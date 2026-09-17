@@ -85,7 +85,7 @@ import com.kingzcheung.xime.clipboard.sync.ClipboardSyncBridge
 import com.kingzcheung.xime.plugin.ExtensionManager
 import com.kingzcheung.xime.plugin.core.api.ToolPlugin
 import com.kingzcheung.xime.plugin.core.api.ToolResult
-import com.kingzcheung.xime.plugin.core.lua.PluginEvent
+import com.kingzcheung.xime.plugin.core.js.PluginEvent
 import com.kingzcheung.xime.plugin.core.runtime.PluginManager
 import com.kingzcheung.xime.speech.AsrBackendFactory
 import com.kingzcheung.xime.speech.RecognitionState
@@ -739,9 +739,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     // 快捷发送列表变更 → 插件事件（仅投递给 manifest 声明
                     // capabilities.events 含 quick_send_changed 的插件）
                     PluginManager.dispatchEvent(
-                        com.kingzcheung.xime.plugin.core.lua.PluginEvent(
-                            com.kingzcheung.xime.plugin.core.lua.PluginEvent.TYPE_QUICK_SEND_CHANGED,
-                            mapOf(com.kingzcheung.xime.plugin.core.lua.PluginEvent.FIELD_COUNT to items.size)
+                        com.kingzcheung.xime.plugin.core.js.PluginEvent(
+                            com.kingzcheung.xime.plugin.core.js.PluginEvent.TYPE_QUICK_SEND_CHANGED,
+                            mapOf(com.kingzcheung.xime.plugin.core.js.PluginEvent.FIELD_COUNT to items.size)
                         )
                     )
                 }
@@ -1058,19 +1058,19 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     val items = uiState.value.toolPanelItems
                     when {
                         items.isEmpty() -> {
-                            // 空结果：若非静默失败（插件刚记录了错误），Toast 告知用户原因
-                            val lastError = com.kingzcheung.xime.plugin.core.security.PluginErrorLog
+                            // 空结果：静默失败。原因已记录到 PluginErrorLog
+                            // （插件中心错误弹窗 / 设置→日志查看器可查看），不打断用户。
+                            com.kingzcheung.xime.plugin.core.security.PluginErrorLog
                                 .getLastError(pluginId)
-                            val errorMessage = lastError?.message
-                            if (!errorMessage.isNullOrEmpty() &&
-                                lastError.timestamp >= epochStartTime
-                            ) {
-                                android.widget.Toast.makeText(
-                                    this@XimeInputMethodService,
-                                    errorMessage,
-                                    android.widget.Toast.LENGTH_LONG
-                                ).show()
-                            }
+                                ?.let { lastError ->
+                                    FileLogger.w(
+                                        TAG,
+                                        "tool panel generate empty result, plugin error: ${
+                                            com.kingzcheung.xime.plugin.core.security.PluginErrorLog
+                                                .userMessage(lastError)
+                                        } ${lastError.message}"
+                                    )
+                                }
                         }
                         else -> commitToolPanelItem(items[0].text)
                     }
@@ -1117,7 +1117,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     /**
      * 工具面板上下文收集（选区 > 输入框选区 > 剪贴板）：
      * 对方消息通常来自聊天 App 复制而非输入框选区，剪贴板兜底是 AI 回复等
-     * 插件拿到上下文的关键路径（插件契约见 plugins/ai-reply/main.lua）。
+     * 插件拿到上下文的关键路径（插件契约见 plugins/ai-reply/main.ts）。
      */
     private fun collectToolPanelContext(): String {
         val ic = currentInputConnection

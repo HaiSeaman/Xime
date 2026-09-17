@@ -20,6 +20,7 @@ import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
 
 class XimeApplication : Application(), ImageLoaderFactory {
 
@@ -83,6 +84,11 @@ class XimeApplication : Application(), ImageLoaderFactory {
         PluginManager.clipboardHostApiFactory = { _ ->
             com.kingzcheung.xime.plugin.ClipboardHostApiImpl(this)
         }
+        com.kingzcheung.xime.plugin.core.security.PluginErrorLog.initialize(
+            com.kingzcheung.xime.plugin.FilePluginErrorStore(
+                File(filesDir, "logs/plugins/errors.jsonl")
+            )
+        )
         PluginManager.initialize(this) {
             if (isDebug) {
                 PluginManager.installPluginsFromAssetsForDebug("plugins")

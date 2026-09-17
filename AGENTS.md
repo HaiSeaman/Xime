@@ -6,8 +6,22 @@
 ## 快速开始
 - 构建： `./gradlew assembleDebug --quiet`
 - 测试： `./gradlew test`
+- **测试前置**：插件测试从 `build/plugin-js/<name>/main.js` 加载编译产物；跑测试前需先构建插件与测试夹具：
+  `xipm build`（仓库根，编译插件）+ `cd tools/xime-plugin && xipm build test-fixture --out ../../build/plugin-js`
 
 ## 插件开发
+- 插件源码为 TypeScript 模块（`plugins/<name>/main.ts` + `manifest.json` + `resources/`）：用 `definePlugin({...})` 定义扩展点并 `export default plugin`；由 Rust CLI `xipm` 编译为 IIFE 单文件 main.js（产物 `var plugin = (...)()` = 宿主 `globalThis.plugin`，QuickJS 执行）
+- **v3 形态（TS 范式）**：host 网络/IO 服务为 async（`await host.http.request(...)`），失败 throw `XimeError`（`code` + `message`，无 `lastError()`）；纯计算 API 同步；扩展点按需 async（`panel.state/onAction`、`speech.*`、`clipboardSync.*`、`backup.*`、`onLoad/onUnload`；`transform.candidates` 必须同步）
+- CLI 二进制名 `xipm`（`cargo run -- ...` 等价；也可 `cargo build --release` 后用 `tools/xime-plugin/target/release/xipm`）
+- 构建全部插件： `xipm build`（仓库根零参数；产物 build/plugin-js/）
+- 打包全部 xipk： `xipm pack`（仓库根零参数；产物 build/plugin-release/*.xipk）
+- 构建/打包单个插件： 在插件目录内运行 `xipm build` / `xipm pack`
+- 打包并同步内置插件到 app assets： `bash scripts/build-plugins.sh --with-assets`
+- 新建插件骨架： `xipm init <name> --type tool`
+- 校验清单： `xipm check`（仓库根零参数批量）
+- 类型检查（可选）： `npx -p typescript tsc -p tsconfig.json --noEmit`
+- SDK 类型定义： `tools/xime-plugin/templates/xime-plugin.d.ts`
+- **完整 CLI 用法**： [tools/xime-plugin/README.md](tools/xime-plugin/README.md)
 - 清除插件数据： `./gradlew clearPlugins`
 - 完全卸载主应用： `./gradlew uninstallApp`
 - [插件开发指南](https://ime.ximei.me/plugins/PLUGIN_DEVELOPMENT_GUIDE) - 开发插件时必读

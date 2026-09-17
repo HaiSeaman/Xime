@@ -37,25 +37,25 @@ object PluginManager {
      * 工厂参数为插件 id，宿主据此查询插件声明的域名与用户授权。
      */
     @Volatile
-    var wsHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.lua.ws.WsHostApi)? = null
+    var wsHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.js.ws.WsHostApi)? = null
 
     /**
      * 宿主 HTTP 白名单 API 提供者（app 层注入，剪贴板同步等插件使用）。
      * 工厂参数为插件 id，宿主据此校验域名白名单与用户授权。
      */
     @Volatile
-    var httpHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.lua.http.HttpHostApi)? = null
+    var httpHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.js.http.HttpHostApi)? = null
 
     /**
      * 宿主 SSE 流式 HTTP 白名单 API 提供者（app 层注入，AI 长文本流式生成等插件使用）。
      * 工厂参数为插件 id，宿主据此校验域名白名单与用户授权（同 httpHostApiFactory）。
      */
     @Volatile
-    var sseHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.lua.http.SseHostApi)? = null
+    var sseHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.js.http.SseHostApi)? = null
 
     /** 宿主加密/编码原语提供者（S3 SigV4 签名等，app 层注入）。 */
     @Volatile
-    var cryptoHostApiFactory: (() -> com.kingzcheung.xime.plugin.core.lua.crypto.CryptoHostApi)? = null
+    var cryptoHostApiFactory: (() -> com.kingzcheung.xime.plugin.core.js.crypto.CryptoHostApi)? = null
 
     /**
      * 宿主快捷发送只读 API 提供者（app 层注入，读 ClipboardManager 内存缓存）。
@@ -63,14 +63,14 @@ object PluginManager {
      * 生命周期管理器才会调用本工厂（未声明插件拿不到 host.quickSend）。
      */
     @Volatile
-    var quickSendHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.lua.QuickSendHostApi)? = null
+    var quickSendHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.js.QuickSendHostApi)? = null
 
     /**
      * 宿主剪贴板只读 API 提供者（app 层注入，读系统剪贴板）。
      * 仅当插件 manifest 声明 `capabilities.clipboard_read: true` 时注入。
      */
     @Volatile
-    var clipboardHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.lua.ClipboardHostApi)? = null
+    var clipboardHostApiFactory: ((pluginId: String) -> com.kingzcheung.xime.plugin.core.js.ClipboardHostApi)? = null
 
     private var frameworkContext: PluginFrameworkContext? = null
     private val _loadedPluginsFlow = MutableStateFlow<Map<String, LoadedPluginInfo>>(emptyMap())
@@ -174,7 +174,7 @@ object PluginManager {
     }
 
     fun getAllInstallPlugins(): List<PluginInfo> {
-        return requireContext().xmlManager.getAllPlugins()
+        return requireContext().pluginRegistry.getAllPlugins()
     }
 
     /**
@@ -183,7 +183,7 @@ object PluginManager {
      *
      * @return 成功投递（进入通道）的实例数。
      */
-    fun dispatchEvent(event: com.kingzcheung.xime.plugin.core.lua.PluginEvent): Int {
+    fun dispatchEvent(event: com.kingzcheung.xime.plugin.core.js.PluginEvent): Int {
         val context = frameworkContext ?: return 0
         var delivered = 0
         for ((_, loaded) in context.loadedPlugins) {
@@ -203,11 +203,11 @@ object PluginManager {
 
     suspend fun setPluginEnabled(pluginId: String, enabled: Boolean): Boolean {
         return try {
-            val pluginInfo = requireContext().xmlManager.getPluginById(pluginId) ?: return false
+            val pluginInfo = requireContext().pluginRegistry.getPluginById(pluginId) ?: return false
             if (pluginInfo.enabled == enabled) return true
             val updatedPluginInfo = pluginInfo.copy(enabled = enabled)
-            requireContext().xmlManager.updatePlugin(updatedPluginInfo)
-            requireContext().xmlManager.flushToDisk()
+            requireContext().pluginRegistry.updatePlugin(updatedPluginInfo)
+            requireContext().pluginRegistry.flushToDisk()
             if (!enabled) {
                 // 禁用时同步卸载运行中实例，避免插件继续后台运行（网络会话/剪贴板监听）
                 unloadPlugin(pluginId)

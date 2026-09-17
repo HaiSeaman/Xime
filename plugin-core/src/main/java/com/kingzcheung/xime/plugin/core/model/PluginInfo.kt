@@ -27,7 +27,7 @@ data class PluginInfo(
     val minHostVersion: String? = null,
     val maxHostVersion: String? = null,
     val trustLevel: TrustLevel = TrustLevel.UNKNOWN,
-    /** Lua 入口脚本路径（相对插件包目录）。插件逻辑全部由该脚本导出。 */
+    /** JS 入口脚本路径（相对插件包目录）。插件逻辑全部由该脚本导出。 */
     val entryScript: String? = null,
     /** 插件声明需要访问的域名（manifest.network.hosts）。联网时需命中可信池或获用户授权。 */
     val declaredHosts: List<String> = emptyList(),

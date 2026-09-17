@@ -3,19 +3,19 @@ package com.kingzcheung.xime.plugin.core.runtime.lifecycle
 import android.app.Application
 import android.util.Log
 import com.kingzcheung.xime.plugin.core.api.IPluginEntryClass
-import com.kingzcheung.xime.plugin.core.lua.LuaAsrPluginAdapter
-import com.kingzcheung.xime.plugin.core.lua.LuaBackupPluginAdapter
-import com.kingzcheung.xime.plugin.core.lua.LuaClipboardSyncPluginAdapter
-import com.kingzcheung.xime.plugin.core.lua.LuaEmojiPluginAdapter
-import com.kingzcheung.xime.plugin.core.lua.LuaPluginAdapter
-import com.kingzcheung.xime.plugin.core.lua.LuaScriptRuntime
-import com.kingzcheung.xime.plugin.core.lua.LuaToolPluginAdapter
+import com.kingzcheung.xime.plugin.core.js.JsAsrPluginAdapter
+import com.kingzcheung.xime.plugin.core.js.JsBackupPluginAdapter
+import com.kingzcheung.xime.plugin.core.js.JsClipboardSyncPluginAdapter
+import com.kingzcheung.xime.plugin.core.js.JsEmojiPluginAdapter
+import com.kingzcheung.xime.plugin.core.js.JsPluginAdapter
+import com.kingzcheung.xime.plugin.core.js.JsScriptRuntime
+import com.kingzcheung.xime.plugin.core.js.JsToolPluginAdapter
 import com.kingzcheung.xime.plugin.core.model.PluginCategory
 import com.kingzcheung.xime.plugin.core.model.PluginContext
 import com.kingzcheung.xime.plugin.core.model.PluginInfo
 import com.kingzcheung.xime.plugin.core.runtime.PluginManager
 import com.kingzcheung.xime.plugin.core.runtime.installer.InstallerManager
-import com.kingzcheung.xime.plugin.core.runtime.installer.XmlManager
+import com.kingzcheung.xime.plugin.core.runtime.installer.PluginRegistry
 import com.kingzcheung.xime.plugin.core.runtime.loader.LoadedPluginInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 class PluginLifecycleManager(
     private val application: Application,
-    private val xmlManager: XmlManager,
+    private val pluginRegistry: PluginRegistry,
     private val installerManager: InstallerManager,
     private val loadedPlugins: ConcurrentHashMap<String, LoadedPluginInfo>,
     private val pluginInstances: ConcurrentHashMap<String, IPluginEntryClass>
@@ -65,8 +65,8 @@ class PluginLifecycleManager(
 
     suspend fun loadEnabledPlugins(): Int = withContext(Dispatchers.IO) {
         Log.d(TAG, "loadEnabledPlugins called")
-        val allPlugins = xmlManager.getAllPlugins()
-        Log.d(TAG, "All plugins from XmlManager: ${allPlugins.map { "${it.id}(enabled=${it.enabled})" }}")
+        val allPlugins = pluginRegistry.getAllPlugins()
+        Log.d(TAG, "All plugins from registry: ${allPlugins.map { "${it.id}(enabled=${it.enabled})" }}")
 
         val hostVersion = com.kingzcheung.xime.plugin.core.util.VersionUtil.getHostVersionName(application)
         val enabledPlugins = allPlugins.filter { plugin ->
@@ -99,7 +99,7 @@ class PluginLifecycleManager(
 
     private suspend fun launchSinglePlugin(pluginId: String): Boolean {
         Log.d(TAG, "launchSinglePlugin: $pluginId")
-        val pluginInfo = xmlManager.getPluginById(pluginId)
+        val pluginInfo = pluginRegistry.getPluginById(pluginId)
         if (pluginInfo == null) {
             Log.w(TAG, "Plugin info not found: $pluginId")
             return false
@@ -148,10 +148,10 @@ class PluginLifecycleManager(
                 return null
             }
             val pluginDir = entryFile.parentFile ?: File(plugin.path).parentFile
-            val runtime = LuaScriptRuntime(
+            val runtime = JsScriptRuntime(
                 pluginId = plugin.id,
                 pluginDir = pluginDir,
-                entryScript = plugin.entryScript ?: "main.lua",
+                entryScript = plugin.entryScript ?: "main.js",
                 configStore = PluginManager.configStoreFactory.create(application, plugin.id),
                 wsHostApi = PluginManager.wsHostApiFactory?.invoke(plugin.id),
                 httpHostApi = PluginManager.httpHostApiFactory?.invoke(plugin.id),
@@ -176,50 +176,50 @@ class PluginLifecycleManager(
 
     private fun instantiatePlugin(loadedPlugin: LoadedPluginInfo): IPluginEntryClass? {
         val plugin = loadedPlugin.pluginInfo
-        Log.d(TAG, "Instantiating Lua plugin: ${plugin.id}")
+        Log.d(TAG, "Instantiating JS plugin: ${plugin.id}")
         return try {
             val pluginContext = PluginContext(
                 application = application,
                 pluginInfo = plugin,
                 configStore = PluginManager.configStoreFactory.create(application, plugin.id)
             )
-            val adapter: LuaPluginAdapter = when (plugin.category) {
+            val adapter: JsPluginAdapter = when (plugin.category) {
                 PluginCategory.ASR ->
-                    LuaAsrPluginAdapter(
+                    JsAsrPluginAdapter(
                         runtime = loadedPlugin.script ?: return null,
                         pluginContext = pluginContext
                     )
                 PluginCategory.EMOJI ->
-                    LuaEmojiPluginAdapter(
+                    JsEmojiPluginAdapter(
                         runtime = loadedPlugin.script ?: return null,
                         pluginContext = pluginContext
                     )
                 PluginCategory.CLIPBOARD_SYNC ->
-                    LuaClipboardSyncPluginAdapter(
+                    JsClipboardSyncPluginAdapter(
                         runtime = loadedPlugin.script ?: return null,
                         pluginContext = pluginContext
                     )
                 PluginCategory.BACKUP ->
-                    LuaBackupPluginAdapter(
+                    JsBackupPluginAdapter(
                         runtime = loadedPlugin.script ?: return null,
                         pluginContext = pluginContext
                     )
                 PluginCategory.TOOL ->
-                    LuaToolPluginAdapter(
+                    JsToolPluginAdapter(
                         runtime = loadedPlugin.script ?: return null,
                         pluginContext = pluginContext
                     )
                 else ->
-                    LuaPluginAdapter(
+                    JsPluginAdapter(
                         runtime = loadedPlugin.script ?: return null,
                         pluginContext = pluginContext
                     )
             }
             adapter.onLoad(pluginContext)
-            Log.d(TAG, "Lua plugin ${plugin.id} onLoad called successfully")
+            Log.d(TAG, "JS plugin ${plugin.id} onLoad called successfully")
             adapter
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to instantiate Lua plugin ${plugin.id}", e)
+            Log.e(TAG, "Failed to instantiate JS plugin ${plugin.id}", e)
             null
         }
     }

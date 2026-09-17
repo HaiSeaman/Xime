@@ -19,7 +19,3 @@
 -keepclassmembers class * {
     public *** *(kotlin.coroutines.Continuation);
 }
-
-# luaj: 库注册依赖反射（bind() 通过 getConstructor/getMethod 按名查找实现类），
-# 混淆会裁剪掉 Bit32LibV 等实现类，运行时报 NoClassDefFoundError，必须整体保留
--keep class org.luaj.vm2.** { *; }

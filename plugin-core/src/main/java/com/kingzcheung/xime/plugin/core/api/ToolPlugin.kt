@@ -42,7 +42,7 @@ data class ToolPanelState(
  *
  * ## 返回协议（宿主强制校验：非法数据将被丢弃并输出协议错误日志）
  *
- * [getPanelState] 必须返回 Lua table，字段：
+ * [getPanelState] 必须返回 JS 对象，字段：
  * - `items`（必填，数组）：候选结果，每个元素 `{ id: string, text: string, insertText?: string, imageUrl?: string }`；
  *   `id` 必须非空且全表唯一，`text` 必须非空，否则该元素被宿主丢弃。
  *   多候选（多条回复）时建议 id 用序号；单条时可用固定值（如 `"result"`）。
