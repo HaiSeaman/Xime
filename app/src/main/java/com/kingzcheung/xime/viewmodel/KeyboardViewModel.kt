@@ -2,8 +2,11 @@ package com.kingzcheung.xime.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import com.kingzcheung.xime.clipboard.ClipboardItem
@@ -127,36 +130,23 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
     /** 打开/收起候选展开页。 */
     fun setCandidatePageExpanded(expanded: Boolean) {
         _candidatePageExpanded.value = expanded
-        if (expanded) {
-            resetExpandedPaging()
-        } else {
+        if (!expanded) {
             // 筛选开关只在展开页左栏：收起后候选栏若仍被过滤将无处可关，自动复位
             _singleCharFilter.value = false
         }
     }
 
-    // ── 展开页本地分页 ──
-    // 候选长度不一，分页单位是"行"（每页条目数浮动），上一页起点无法由当前位置
-    // 反推，故用页起点栈：next 压栈、prev 弹栈，编码刷新/切过滤/重新展开时清栈。
+    // ── 展开页翻页联动 ──
+    // 硬件键盘 DPAD 上/下经此事件流驱动展开页滚动一屏
 
-    companion object {
-        /** 每页行数兜底值（UI 尚未测量出实际高度时用） */
-        const val EXPANDED_ROWS_PER_PAGE = 4
+    /** 硬件键盘翻页事件：+1 向下滚一屏、-1 向上滚一屏 */
+    private val _expandedPageScrollEvents = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+    val expandedPageScrollEvents: SharedFlow<Int> = _expandedPageScrollEvents.asSharedFlow()
+
+    /** 请求展开页滚动一屏（硬件键盘 DPAD 上/下） */
+    fun requestExpandedPageScroll(direction: Int) {
+        _expandedPageScrollEvents.tryEmit(direction)
     }
-
-    /**
-     * 每页行数：由 KeyboardView 按展开区实际高度动态测算（撑满整页）后写入，
-     * 服务层硬件翻页键读同一值保证切页一致；未测量前用兜底常量。
-     */
-    @Volatile
-    var expandedRowsPerPage: Int = EXPANDED_ROWS_PER_PAGE
-
-    /** 页起点栈（过滤列表下标），栈顶 = 当前页起点，栈底恒为 0 */
-    private val _expandedPageStarts = MutableStateFlow(listOf(0))
-    val expandedPageStarts: StateFlow<List<Int>> = _expandedPageStarts.asStateFlow()
-
-    /** 当前页在过滤列表中的起始下标 */
-    val expandedPageStart: Int get() = _expandedPageStarts.value.last()
 
     /** "只看单字"过滤（展开页左栏底部切换按钮） */
     private val _singleCharFilter = MutableStateFlow(false)
@@ -164,34 +154,7 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
 
     fun toggleSingleCharFilter() {
         _singleCharFilter.value = !_singleCharFilter.value
-        resetExpandedPaging()
     }
-
-    /** 编码刷新 / 切过滤 / 重新展开时重置到第一页 */
-    fun resetExpandedPaging() {
-        _expandedPageStarts.value = listOf(0)
-    }
-
-    /** 恢复到指定页起点（如展开页删除自造词后停留在删除发生的页；第一页不产生回退项） */
-    fun restoreExpandedPage(start: Int) {
-        _expandedPageStarts.value = if (start > 0) listOf(0, start) else listOf(0)
-    }
-
-    /** 翻到下一页：调用方先用 pager 切页，确认 hasNext 后传入下一页起点 */
-    fun pushExpandedPage(nextStart: Int) {
-        _expandedPageStarts.value = _expandedPageStarts.value + nextStart
-    }
-
-    /** 返回上一页：栈底（第一页）不可再退 */
-    fun popExpandedPage(): Boolean {
-        val starts = _expandedPageStarts.value
-        if (starts.size <= 1) return false
-        _expandedPageStarts.value = starts.dropLast(1)
-        return true
-    }
-
-    /** 是否可退回上一页 */
-    fun hasPrevExpandedPage(): Boolean = _expandedPageStarts.value.size > 1
 
 
     /** 是否从 handwriting 进入英文键盘，用于 ASCII 切回时恢复 handwriting */

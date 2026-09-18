@@ -1,14 +1,18 @@
 package com.kingzcheung.xime.ui.keyboard
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -28,9 +32,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,22 +59,31 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+
+/**
+ * 候选展开页条目：候选文本 + 拼音注释 + 跨页全局索引。
+ */
+data class CandidateEntry(
+    val text: String,
+    val comment: String = "",
+    val globalIndex: Int = -1,
+)
 
 /**
  * 候选展开页数据。
  *
+ * @param candidateRows 行分组的候选（行分组仅作展示分组）
  * @param keyBackgroundColor 左右两栏按键底色（键盘按键色）；[Color.Unspecified] 时
  *                          用 textColor 半透明兜底，保证单独预览时也不失形。
  */
 data class CandidatePageState(
-    val candidates: List<String>,
-    val candidateComments: List<String> = emptyList(),
+    val candidateRows: List<List<CandidateEntry>> = emptyList(),
     val associationCandidates: List<String> = emptyList(),
     val backgroundColor: Color,
     val textColor: Color,
     val keyBackgroundColor: Color = Color.Unspecified,
-    val hasNextPage: Boolean = false,
-    val hasPrevPage: Boolean = false,
     val bottomPaddingDp: Int = 0,
     /** "只看单字"过滤开启中（左栏底部切换按钮的选中态） */
     val singleCharFilter: Boolean = false,
@@ -91,25 +106,20 @@ data class CandidatePageState(
 /**
  * 候选展开页回调。
  *
- * @param onCandidateSelect 本地页内点选（KeyboardView 换算为跨页全局索引）
+ * @param onCandidateSelect 页内点选（携带跨页全局索引，KeyboardView 直接路由引擎）
  * @param onToggleSingleCharFilter 左栏底部"候选/单字"切换
- * @param onContentHeightChanged 中间候选+联想内容实测高度（px），宿主据此闭环
- *        调整每页行数以精确撑满展开区
  * @param onCommitText 左栏快捷符号上屏
  * @param onDelete     右栏退格键
  * @param onEnter      右栏回车键
  */
 data class CandidatePageCallbacks(
-    val onCandidateSelect: (Int) -> Unit,
+    val onCandidateSelect: (CandidateEntry) -> Unit,
     val onAssociationSelect: ((Int) -> Unit)? = null,
     val onToggleSingleCharFilter: (() -> Unit)? = null,
-    val onContentHeightChanged: ((Int) -> Unit)? = null,
-    /** 长按候选删除自造词（index 为本地页内索引，KeyboardView 换算全局索引） */
-    val onCandidateLongPress: ((Int) -> Unit)? = null,
+    /** 长按候选删除自造词 */
+    val onCandidateLongPress: ((CandidateEntry) -> Unit)? = null,
     /** 左栏拼音候选点选（九键音节切换，index 对应 railPinyinOptions） */
     val onRailPinyinSelect: ((Int) -> Unit)? = null,
-    val onPageDown: (() -> Unit)? = null,
-    val onPageUp: (() -> Unit)? = null,
     val onCommitText: ((String) -> Unit)? = null,
     val onDelete: (() -> Unit)? = null,
     val onEnter: (() -> Unit)? = null,
@@ -118,24 +128,30 @@ data class CandidatePageCallbacks(
 /** 左栏快捷符号（对齐主流输入法候选展开页的符号栏）。 */
 private val QUICK_SYMBOLS = listOf("？", "！", "……", "~")
 
+/** 性能打点开关 */
+private const val debugPerfLogging = true
+
 /**
  * 候选展开页主体（三栏）——渲染在真实候选栏正下方（候选栏的在位展开态，非 Overlay 页）：
  * ┌────────┬────────────────────────────┬───────┐
  * │ ？     │  词 词词 词 词词词（流式换行）│ │ 退格  │
  * │ ！     │  词 词 词 词（附拼音注释）  │ │ 上一页│
- * │ ……     │  （本地分页切片，不滚动，  │ │ 下一页│
- * │ ~      │    联想词在下方）          │ │ 回车  │
+ * │ ……     │  （行分组惰性渲染只画可见行，│ │ 下一页│
+ * │ ~      │    超出视口即上下滑动）     │ │ 回车  │
  * │ 候选/单字│                          │ │       │
  * └────────┴────────────────────────────┴───────┘
  * 左栏样式对齐数字键盘左栏：上部快捷符号键、底部"候选/单字"切换。
- * 数据源为跨页全量候选的本地分页切片；收起按钮在上方候选栏右侧；
- * 编码删空时由宿主自动收起本页。
+ * 数据源为跨页全量候选，不做本地分页；收起按钮在上方候选栏右侧；
+ * 编码删空时由宿主自动收起本页；翻页键 = 视口滚动一屏（上下到头自动置灰），
+ * [pageScrollEvents] 供硬件键盘 DPAD 上/下联动同样的滚动。
  */
 @Composable
 fun CandidatePage(
     state: CandidatePageState,
     callbacks: CandidatePageCallbacks,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pageScrollEvents: Flow<Int>? = null,
+    onHapticFeedback: (() -> Unit)? = null,
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape =
@@ -153,6 +169,25 @@ fun CandidatePage(
     val railWidthModifier = if (state.leftRailWidthDp > 0)
         Modifier.fillMaxHeight().width(state.leftRailWidthDp.dp)
     else Modifier.fillMaxHeight().width(leftRailWidth)
+
+    // 中间候选区滚动；翻页 = 滚动一屏
+    val listState = rememberLazyListState()
+    var viewportHeightPx by remember { mutableIntStateOf(0) }
+    val scrollScope = rememberCoroutineScope()
+    fun scrollPage(direction: Int) {
+        val viewport = viewportHeightPx
+        if (viewport > 0) {
+            scrollScope.launch { listState.animateScrollBy(direction.toFloat() * viewport) }
+        }
+    }
+    // 候选内容变化（新输入/切过滤/删词）回到顶部（列表实例每次重组都新建，用哈希做键）
+    LaunchedEffect(state.candidateRows.hashCode()) {
+        listState.scrollToItem(0)
+    }
+    // 硬件键盘 DPAD 上/下的翻页联动
+    LaunchedEffect(pageScrollEvents) {
+        pageScrollEvents?.collect { direction -> scrollPage(direction) }
+    }
 
     Column(
         modifier = modifier
@@ -251,59 +286,70 @@ fun CandidatePage(
             )
             Spacer(modifier = Modifier.width(8.dp))
 
-            // ── 中间：候选流式排列（条目按内容宽度自适应、放不下自动换行）。
-            // 数据源是本地分页切片（无需滚动容器）；高度随内容自适应并把实测
-            // 内容高度上报给宿主，供其闭环调整每页行数以精确撑满。
-            // padding 在 onSizeChanged 外侧，上报值不含垂直边距（与 Row 承担
-            // padding 时同口径）──
-            Column(
+            // ── 中间：候选行分组列表（LazyColumn 只渲染可见行），联想词在末尾
+            // 随内容一并滚动 ──
+            LazyColumn(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 6.dp)
-                    .onSizeChanged { callbacks.onContentHeightChanged?.invoke(it.height) }
+                    .onSizeChanged { viewportHeightPx = it.height },
+                state = listState,
+                contentPadding = PaddingValues(vertical = 6.dp)
             ) {
-                if (state.candidates.isNotEmpty()) {
-                    FlexRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalSpacing = 6.dp,
-                        verticalSpacing = 6.dp
+                itemsIndexed(
+                    state.candidateRows,
+                    key = { _, row -> row.first().globalIndex },
+                    contentType = { _, _ -> "candidateRow" }
+                ) { _, row ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min)
                     ) {
-                        state.candidates.forEachIndexed { index, candidate ->
-                            if (index > 0) FlexRowDivider(dividerColor)
+                        row.forEachIndexed { colIndex, entry ->
+                            if (colIndex > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(1.dp)
+                                        .fillMaxHeight(0.6f)
+                                        .align(Alignment.CenterVertically)
+                                        .background(dividerColor)
+                                )
+                            }
                             CandidatePageItem(
-                                text = candidate,
-                                comment = state.candidateComments.getOrElse(index) { "" },
-                                onClick = { callbacks.onCandidateSelect(index) },
-                                onLongClick = { callbacks.onCandidateLongPress?.invoke(index) },
-                                textColor = state.textColor
+                                entry = entry,
+                                onClick = { callbacks.onCandidateSelect(entry) },
+                                onLongClick = { callbacks.onCandidateLongPress?.invoke(entry) },
+                                textColor = state.textColor,
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
                 }
 
                 if (state.associationCandidates.isNotEmpty()) {
-                    if (state.candidates.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(dividerColor)
-                        )
-                    }
-                    FlexRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalSpacing = 6.dp,
-                        verticalSpacing = 6.dp
-                    ) {
-                        state.associationCandidates.forEachIndexed { index, candidate ->
-                            if (index > 0) FlexRowDivider(dividerColor)
-                            CandidatePageItem(
-                                text = candidate,
-                                comment = "",
-                                onClick = { callbacks.onAssociationSelect?.invoke(index) },
-                                textColor = state.textColor
+                    item(key = "assoc") {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(dividerColor)
                             )
+                            FlexRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalSpacing = 6.dp,
+                                verticalSpacing = 6.dp
+                            ) {
+                                state.associationCandidates.forEachIndexed { index, candidate ->
+                                    if (index > 0) FlexRowDivider(dividerColor)
+                                    CandidatePageItem(
+                                        entry = CandidateEntry(text = candidate),
+                                        onClick = { callbacks.onAssociationSelect?.invoke(index) },
+                                        textColor = state.textColor
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -336,28 +382,34 @@ fun CandidatePage(
                     )
                 }
                 RailKey(
-                    onClick = { callbacks.onPageUp?.invoke() },
+                    onClick = {
+                        onHapticFeedback?.invoke()
+                        scrollPage(-1)
+                    },
                     keyBg = keyBg,
                     modifier = railKeyModifier,
-                    enabled = state.hasPrevPage && callbacks.onPageUp != null
+                    enabled = listState.canScrollBackward
                 ) {
                     Icon(
                         imageVector = Icons.Filled.KeyboardArrowUp,
                         contentDescription = "上一页",
-                        tint = if (state.hasPrevPage) state.textColor else state.textColor.copy(alpha = 0.3f),
+                        tint = if (listState.canScrollBackward) state.textColor else state.textColor.copy(alpha = 0.3f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
                 RailKey(
-                    onClick = { callbacks.onPageDown?.invoke() },
+                    onClick = {
+                        onHapticFeedback?.invoke()
+                        scrollPage(1)
+                    },
                     keyBg = keyBg,
                     modifier = railKeyModifier,
-                    enabled = state.hasNextPage && callbacks.onPageDown != null
+                    enabled = listState.canScrollForward
                 ) {
                     Icon(
                         imageVector = Icons.Filled.KeyboardArrowDown,
                         contentDescription = "下一页",
-                        tint = if (state.hasNextPage) state.textColor else state.textColor.copy(alpha = 0.3f),
+                        tint = if (listState.canScrollForward) state.textColor else state.textColor.copy(alpha = 0.3f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -387,20 +439,21 @@ fun CandidatePage(
 }
 
 /**
- * 流式候选条目：候选词与拼音注释拼进同一文本（注释用次级色 + 注释字体，对齐
- * fcitx5 的 SpannableString 方案），字号固定不缩放，超宽时省略号截断。
- * 条目间竖分隔线由 FlexRow 摆放（调用处在条目之间插入 FlexRowDivider）。
+ * 候选条目：候选词与拼音注释拼进同一文本（注释用次级色 + 注释字体），
+ * 字号固定不缩放，超宽时省略号截断。
+ * 行内条目间竖分隔线：主候选区由行 Row 摆放（条目 weight 均分宽度），
+ * 联想区仍由 FlexRow 摆放。
  */
 @Composable
 private fun CandidatePageItem(
-    text: String,
-    comment: String,
+    entry: CandidateEntry,
     onClick: () -> Unit,
     textColor: Color,
+    modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
 ) {
-    val displayComment = comment.replace("~", "")
-    val annotated = remember(text, displayComment, textColor) {
+    val displayComment = entry.comment.replace("~", "")
+    val annotated = remember(entry.text, displayComment, textColor) {
         buildAnnotatedString {
             withStyle(
                 SpanStyle(
@@ -409,7 +462,7 @@ private fun CandidatePageItem(
                     fontFamily = AppFonts.candidateFontFamily
                 )
             ) {
-                append(text)
+                append(entry.text)
             }
             if (displayComment.isNotEmpty()) {
                 withStyle(
@@ -430,7 +483,7 @@ private fun CandidatePageItem(
     val isPressed by interactionSource.collectIsPressedAsState()
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(6.dp))
             .background(if (isPressed) textColor.copy(alpha = 0.12f) else Color.Transparent)
             .tolerantClick(
@@ -452,9 +505,8 @@ private fun CandidatePageItem(
 }
 
 /**
- * 简化 flexbox 行布局（对齐 fcitx5 展开候选的 FlexboxLayoutManager 方案）：
- * 条目先按内容宽度贪心分行（放不下自动换行），再把每行剩余宽度均分给该行
- * 所有条目拉宽（flexGrow=1 语义），保证每行两端饱满、行尾不留空白。
+ * 简化 flexbox 行布局：条目先按内容宽度贪心分行（放不下自动换行），再把每行
+ * 剩余宽度均分给该行所有条目拉宽，保证每行两端饱满、行尾不留空白。
  * content 中的 [FlexRowDivider] 子项被摆放在其前条目与下一条目的间隙正中，
  * 行尾条目后的分隔线不绘制。
  */
@@ -484,6 +536,7 @@ private fun FlexRow(
                 val hSpace = horizontalSpacing.roundToPx()
                 val vSpace = verticalSpacing.roundToPx()
                 val maxWidth = constraints.maxWidth
+                val perfT0 = android.os.SystemClock.elapsedRealtime()
 
                 // 解析子项：条目 + 条目间分隔线（分隔线归属其前条目）
                 val itemMeasurables = mutableListOf<Measurable>()
@@ -566,6 +619,15 @@ private fun FlexRow(
 
                 val totalHeight = rowHeights.sum() +
                     vSpace * (rowHeights.size - 1).coerceAtLeast(0)
+                if (debugPerfLogging) {
+                    val cost = android.os.SystemClock.elapsedRealtime() - perfT0
+                    if (cost > 3) {
+                        android.util.Log.d(
+                            "CandidatePerf",
+                            "FlexRow measure: items=${itemMeasurables.size} rows=${rows.size} cost=${cost}ms"
+                        )
+                    }
+                }
                 layout(maxWidth, totalHeight) {
                     var y = 0
                     rowPlacements.forEachIndexed { ri, entries ->

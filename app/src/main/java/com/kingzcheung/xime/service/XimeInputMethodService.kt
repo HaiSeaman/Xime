@@ -78,7 +78,6 @@ import com.kingzcheung.xime.ui.keyboard.KeyboardCallbacks
 import com.kingzcheung.xime.ui.keyboard.KeyboardLayoutState
 import com.kingzcheung.xime.viewmodel.KeyboardUiState
 import com.kingzcheung.xime.viewmodel.KeyboardViewModel
-import com.kingzcheung.xime.service.ExpandedCandidatePager
 import com.kingzcheung.xime.association.AssociationService
 import com.kingzcheung.xime.clipboard.ClipboardManager
 import com.kingzcheung.xime.clipboard.sync.ClipboardSyncBridge
@@ -240,6 +239,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
      *  主线程写（onStartInput）、key-processing 线程读（英文联想短路），volatile 保证可见性。 */
     @Volatile
     private var editorRestricted: Boolean = false
+    /** 秘密输入框（密码/TYPE_NULL）：英文联想与回删替换的统一禁用线 */
+    private var editorSecret: Boolean = false
     private var floatingWinX = 100
     private var floatingWinY = 300
     
@@ -279,12 +280,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }
     }
 
-    /**
-     * 刷新展开页的跨页全量候选（本地分页数据源）：展开态时经 candidate_list
-     * 迭代器一次拉全量（含 comment），并重置页码到第一页（编码已变化）；
-     * 非展开态清空以省内存。编码变化（applyComposition/updateUIWithResult）
-     * 与用户展开动作时调用。
-     */
+    /** 刷新展开页的跨页全量候选；非展开态清空以省内存。编码变化与展开动作时调用 */
     internal fun refreshExpandedCandidates() {
         if (!keyboardViewModel.candidatePageExpanded.value) {
             if (candidateState.value.expandedCandidates.isNotEmpty()) {
@@ -292,25 +288,18 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             }
             return
         }
+        val perfT0 = android.os.SystemClock.elapsedRealtime()
         val all = rimeEngine.getAllCandidates().toList()
-        keyboardViewModel.resetExpandedPaging()
         candidateState.value = candidateState.value.copy(expandedCandidates = all)
+        android.util.Log.d(
+            "CandidatePerf",
+            "refreshExpandedCandidates: count=${all.size} cost=${android.os.SystemClock.elapsedRealtime() - perfT0}ms"
+        )
     }
 
-    /** 硬件键盘在展开态按 DPAD_DOWN：本地 pager 切下一页（行数与 UI 层同源） */
-    private fun expandedPageDown() {
-        val all = candidateState.value.expandedCandidates
-        if (all.isEmpty()) return
-        val filtered = ExpandedCandidatePager.filterIndices(all, keyboardViewModel.singleCharFilter.value)
-        val dm = resources.displayMetrics
-        val page = ExpandedCandidatePager.pageSlice(
-            filtered,
-            keyboardViewModel.expandedPageStart,
-            keyboardViewModel.expandedRowsPerPage,
-            ExpandedCandidatePager.rowWidthUnits(dm.widthPixels.toFloat(), dm.density, dm.scaledDensity),
-            all
-        )
-        if (page.hasNext) keyboardViewModel.pushExpandedPage(page.nextStart)
+    /** 硬件键盘在展开态按 DPAD_DOWN/UP：展开页滚动一屏（经事件流驱动 UI） */
+    private fun expandedPageScroll(direction: Int) {
+        keyboardViewModel.requestExpandedPageScroll(direction)
     }
     
     internal val predictionManager = PredictionManager(
@@ -392,11 +381,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     private fun loadDarkModePreference() {
         val isLandscape = resources.configuration.screenWidthDp > resources.configuration.screenHeightDp
         val isFloatingMode = SettingsPreferences.isFloatingMode(this, isLandscape)
-        SettingsPreferences.setFloatingMode(this, isFloatingMode, !isLandscape)
         val loadedX = SettingsPreferences.getFloatingOffsetX(this, isLandscape)
         val loadedY = SettingsPreferences.getFloatingOffsetY(this, isLandscape)
-        SettingsPreferences.setFloatingOffsetX(this, loadedX, !isLandscape)
-        SettingsPreferences.setFloatingOffsetY(this, loadedY, !isLandscape)
         val screenW = resources.configuration.screenWidthDp
         val screenH = resources.configuration.screenHeightDp
         val portraitWidth = minOf(screenW, screenH)
@@ -1605,14 +1591,13 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
                     if (keyboardViewModel.candidatePageExpanded.value) {
-                        expandedPageDown(); highlightIndex.intValue = 0; return true
+                        expandedPageScroll(1); highlightIndex.intValue = 0; return true
                     }
                     if (candidateState.value.hasNextPage) { keyRouter.pageDown(); highlightIndex.intValue = 0; return true }
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
                     if (keyboardViewModel.candidatePageExpanded.value) {
-                        if (keyboardViewModel.popExpandedPage()) highlightIndex.intValue = 0
-                        return true
+                        expandedPageScroll(-1); highlightIndex.intValue = 0; return true
                     }
                     if (candidateState.value.hasPrevPage) { keyRouter.pageUp(); highlightIndex.intValue = 0; return true }
                 }
@@ -1702,6 +1687,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
         // 受限输入框判定（密码/终端/NO_SUGGESTIONS）：供英文联想等补全功能短路
         editorRestricted = EditorInfoClassifier.isRestrictedEditor(attribute)
+        // 秘密输入框判定（密码/终端，不含 NO_SUGGESTIONS）：英文联想/回删替换的禁用线
+        editorSecret = EditorInfoClassifier.isSecretEditor(attribute)
 
         // 输入 target 变化：旧编辑框的 composing 区域不再可达，复位标记。
         // 防御 stale 标记导致 endComposingInputBox 对新编辑框执行 setComposingText("")
@@ -2200,6 +2187,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
      * 英文联想等补全类功能应短路。
      */
     internal fun isEditorRestricted(): Boolean = editorRestricted
+
+    internal fun isSecretEditor(): Boolean = editorSecret
 
     /**
      * 当前宿主是否支持英文候选的"回删替换"机制。

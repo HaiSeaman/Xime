@@ -8,7 +8,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -106,7 +105,6 @@ fun KeyboardView(
     val keyboardState by viewModel.keyboardState.collectAsStateWithLifecycle()
     val page by viewModel.page.collectAsStateWithLifecycle()
     val candidatePageExpanded by viewModel.candidatePageExpanded.collectAsStateWithLifecycle()
-    val expandedPageStarts by viewModel.expandedPageStarts.collectAsStateWithLifecycle()
     val singleCharFilter by viewModel.singleCharFilter.collectAsStateWithLifecycle()
 
     // 候选展开页自动收起：编码删空（无候选也无联想）时不留空页。
@@ -281,13 +279,9 @@ fun KeyboardView(
             var handwritingActiveLen by remember { mutableStateOf(0) }
             var handwritingLastSegLen by remember { mutableStateOf(0) }
 
-            // 候选栏实际显示的打字候选数（不滑动只显示放得下的；展开页以此为偏移跳过）
-            var barVisibleCount by remember { mutableStateOf(0) }
-
-            // 数据源统一（展开与否即切换点）：展开态下候选栏与展开页吃同一份
-            // 全量列表（expandedCandidates，展开时服务层重新拉取）——候选栏显示
-            // 前若干个、展开页经 filterIndices 偏移接续，点选/长按走全局索引；
-            // 非展开态候选栏保持引擎当前页（"每页候选词数"），不全量
+            // 数据源（展开与否即切换点）：展开态下候选栏与展开页同吃全量列表
+            // （expandedCandidates，展开时服务层重新拉取）；非展开态候选栏保持
+            // 引擎当前页（"每页候选词数"）
             val expandedDataMode = candidatePageExpanded &&
                 candidateState.value.expandedCandidates.isNotEmpty()
 
@@ -538,10 +532,9 @@ fun KeyboardView(
                     onShowMoreCandidates = {
                         onHapticFeedback?.invoke()
                         viewModel.setCandidatePageExpanded(true)
-                        // 拉取跨页全量候选（本地分页数据源，含首次展开）
+                        // 拉取跨页全量候选（展开页数据源，含首次展开）
                         callbacks.onRequestExpandedCandidates?.invoke()
                     },
-                    onVisibleCandidateCountChanged = { barVisibleCount = it },
                     onInputTextClick = {
                         if (candidateState.value.inputText.isNotEmpty()) {
                             callbacks.onClipboardSelect?.invoke(candidateState.value.inputText)
@@ -591,8 +584,8 @@ fun KeyboardView(
 
             if (candidatePageExpanded) {
                 // 候选展开页：候选栏的在位展开态（顶部即真实候选栏，实时跟随编码/删除变化）。
-                // 数据源为服务层的跨页全量候选（expandedCandidates），翻页是纯本地切页
-                // （按行贪心分行，与布局层 FlexRow 同算法），不再驱动 rime session 翻页。
+                // 数据源为服务层的跨页全量候选（expandedCandidates），行分组惰性渲染
+                // （LazyColumn 只画可见行），可上下滑动 + 翻页键滚动一屏，不驱动 rime 翻页。
                 val allExpanded = candidateState.value.expandedCandidates
                 // 左栏符号复刻当前键盘左栏：九键/笔画各自的可自定义 side_symbols
                 // （configVersion 参与重组，保证设置改动后刷新）；其余布局用默认快捷符号
@@ -627,12 +620,7 @@ fun KeyboardView(
                     if (isT9Layout && t9Controller.leftPanelState ==
                         T9InputController.LeftPanelState.SELECTION
                     ) t9Controller.firstOptions.indexOf(t9Controller.selectedOption) else -1
-                // 从候选栏已显示数量之后开始衔接（barVisibleCount 与过滤同口径：
-                // 筛选态=已显示的单字数，非筛选=已显示的候选数），避免重复展示
-                val filteredIndices = ExpandedCandidatePager.filterIndices(
-                    allExpanded, singleCharFilter, fromIndex = barVisibleCount
-                )
-                // 行容量（字符当量）估算，UI 层与服务层（硬件翻页键）统一换算
+                // 展开页展示全量候选；行分组按字符当量估算，仅作展示分组
                 val rowWidthUnits = with(LocalDensity.current) {
                     ExpandedCandidatePager.rowWidthUnits(
                         screenWidthPx = LocalConfiguration.current.screenWidthDp.dp.toPx(),
@@ -640,149 +628,111 @@ fun KeyboardView(
                         scaledDensity = density * fontScale
                     )
                 }
-                // 每页行数闭环校准：先按区域高度估算初值，再以 CandidatePage 上报的
-                // 实测内容高度迭代调整——还能再放一行则 +1、溢出则 -1，精确撑满；
-                // 联想区占用的空间在实测中自动扣减，无需预估。
-                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    val density = LocalDensity.current
-                    val areaHeightPx = with(density) { maxHeight.toPx() }
-                    val bottomPaddingPx = with(density) { state.keyboardBottomPaddingDp.dp.toPx() }
-                    val bodyVerticalPaddingPx = with(density) { 12.dp.toPx() }
-                    var rowsPerPage by remember {
-                        mutableStateOf(
-                            ExpandedCandidatePager.rowsForArea(
-                                areaHeightPx, density.density, density.density * density.fontScale,
-                                bottomPaddingPx
-                            )
-                        )
-                    }
-                    var contentHeightPx by remember { mutableStateOf(0) }
-                    val expandedPage = ExpandedCandidatePager.pageSlice(
-                        filteredIndices,
-                        expandedPageStarts.lastOrNull() ?: 0,
-                        rowsPerPage,
-                        rowWidthUnits,
-                        allExpanded
-                    )
-                    LaunchedEffect(contentHeightPx, areaHeightPx, expandedPage.hasNext) {
-                        if (contentHeightPx <= 0 || areaHeightPx <= 0) return@LaunchedEffect
-                        val available = areaHeightPx - bottomPaddingPx - bodyVerticalPaddingPx
-                        val rowHeight = contentHeightPx / rowsPerPage.coerceAtLeast(1)
-                        when {
-                            expandedPage.hasNext && contentHeightPx + rowHeight <= available ->
-                                if (rowsPerPage < 12) rowsPerPage++
-                            contentHeightPx > available && rowsPerPage > 1 -> rowsPerPage--
+                val candidateRows = remember(
+                    allExpanded, singleCharFilter, rowWidthUnits
+                ) {
+                    ExpandedCandidatePager.flowRows(
+                        ExpandedCandidatePager.filterIndices(allExpanded, singleCharFilter),
+                        allExpanded,
+                        rowWidthUnits
+                    ).map { row ->
+                        row.map { gi ->
+                            CandidateEntry(allExpanded[gi].text, allExpanded[gi].comment, gi)
                         }
                     }
-                    SideEffect { viewModel.expandedRowsPerPage = rowsPerPage }
-                    CandidatePage(
-                        state = CandidatePageState(
-                            candidates = expandedPage.globalIndices.map { allExpanded[it].text },
-                            candidateComments = expandedPage.globalIndices.map { allExpanded[it].comment },
-                            associationCandidates = candidateState.value.associationCandidates.toList(),
-                            backgroundColor = keyboardBgColor,
-                            textColor = candidateTextColor,
-                            keyBackgroundColor = keyBgColor,
-                            hasNextPage = expandedPage.hasNext,
-                            hasPrevPage = viewModel.hasPrevExpandedPage(),
-                            bottomPaddingDp = state.keyboardBottomPaddingDp,
-                            singleCharFilter = singleCharFilter,
-                            railSymbols = customRailSymbols.orEmpty(),
-                            leftRailWidthDp = t9RailWidthDp,
-                            leftRailInsetDp = t9RailInsetDp,
-                            railPinyinOptions = railPinyinOptions,
-                            railSelectedPinyinIndex = railSelectedPinyinIndex,
-                            railAccentColor = accentColor,
-                        ),
-                        callbacks = CandidatePageCallbacks(
-                            onCandidateSelect = { index ->
-                                // 本地页内索引 → 跨页全局索引（引擎侧 select_candidate）
-                                val globalIndex = expandedPage.globalIndices.getOrNull(index)
-                                if (globalIndex != null) {
-                                    callbacks.onGlobalCandidateSelect?.invoke(globalIndex)
-                                    viewModel.setCandidatePageExpanded(false)
-                                }
-                            },
-                            onCandidateLongPress = { index ->
-                                // 长按删除自造词：换算全局索引，与候选栏共用确认弹窗
-                                val globalIndex = expandedPage.globalIndices.getOrNull(index)
-                                val word = globalIndex?.let {
-                                    candidateState.value.expandedCandidates.getOrNull(it)?.text
-                                }
-                                if (globalIndex != null && !word.isNullOrEmpty()) {
-                                    onHapticFeedback?.invoke()
-                                    deletePending = DeletePendingWord(word) {
-                                        callbacks.onGlobalCandidateDelete?.invoke(globalIndex)
-                                    }
-                                }
-                            },
-                            onToggleSingleCharFilter = {
-                                onHapticFeedback?.invoke()
-                                viewModel.toggleSingleCharFilter()
-                            },
-                            onContentHeightChanged = { contentHeightPx = it },
-                            onAssociationSelect = { index ->
-                                callbacks.onAssociationSelect?.invoke(index)
-                                viewModel.setCandidatePageExpanded(false)
-                            },
-                            onPageDown = {
-                                onHapticFeedback?.invoke()
-                                if (expandedPage.hasNext) viewModel.pushExpandedPage(expandedPage.nextStart)
-                            },
-                            onPageUp = {
-                                onHapticFeedback?.invoke()
-                                viewModel.popExpandedPage()
-                            },
-                            onRailPinyinSelect = { index ->
-                                onHapticFeedback?.invoke()
-                                if (isT9Layout) {
-                                    // 与九键键盘左栏同语义：切换音节选项，引擎重组后
-                                    // 服务层重拉全量候选，展开页内容随之刷新
-                                    t9Controller.firstOptions.getOrNull(index)?.let {
-                                        t9Controller.onChoiceSelected(it)
-                                    }
-                                }
-                            },
-                            onCommitText = { text ->
-                                onHapticFeedback?.invoke()
-                                if (customRailSymbols != null) {
-                                    // 九键/笔画左栏符号：与键盘本体左栏同路径（onKeyPress，
-                                    // 由 rime punctuator 决定顶屏/上屏行为）
-                                    callbacks.onKeyPress(text, false)
-                                } else {
-                                    callbacks.onCommitText?.invoke(text)
-                                }
-                            },
-                            onDelete = {
-                                onHapticFeedback?.invoke()
-                                if (isT9Layout) {
-                                    // 与九键键盘本体退格键（T9KeyboardLayout.handleDelete）
-                                    // 完全同路径：T9 撤销模型（删未分配数字/撤销左栏选择/
-                                    // 撤销上屏），buffer→rime 经 FlushRimeInput 同步；
-                                    // 引擎不消费时才转服务层普通删除。此前直接走
-                                    // onKeyPress("delete") 缺 flush，T9 buffer 已回退但
-                                    // rime composition 不刷新，表现为连按多次才删掉
-                                    t9Controller.onDeleted { result ->
-                                        when (result) {
-                                            T9InputController.DeleteResult.UNDO_COMMIT ->
-                                                t9Controller.clearRimeAndResend()
-                                            T9InputController.DeleteResult.NOT_CONSUMED ->
-                                                callbacks.onKeyPress("delete", false)
-                                            else -> {}
-                                        }
-                                    }
-                                } else {
-                                    callbacks.onKeyPress("delete", false)
-                                }
-                            },
-                            onEnter = {
-                                onHapticFeedback?.invoke()
-                                callbacks.onKeyPress("enter", false)
-                            },
-                        ),
-                        modifier = Modifier.fillMaxSize()
-                    )
                 }
+                CandidatePage(
+                    state = CandidatePageState(
+                        candidateRows = candidateRows,
+                        associationCandidates = candidateState.value.associationCandidates.toList(),
+                        backgroundColor = keyboardBgColor,
+                        textColor = candidateTextColor,
+                        keyBackgroundColor = keyBgColor,
+                        bottomPaddingDp = state.keyboardBottomPaddingDp,
+                        singleCharFilter = singleCharFilter,
+                        railSymbols = customRailSymbols.orEmpty(),
+                        leftRailWidthDp = t9RailWidthDp,
+                        leftRailInsetDp = t9RailInsetDp,
+                        railPinyinOptions = railPinyinOptions,
+                        railSelectedPinyinIndex = railSelectedPinyinIndex,
+                        railAccentColor = accentColor,
+                    ),
+                    callbacks = CandidatePageCallbacks(
+                        onCandidateSelect = { entry ->
+                            // entry.globalIndex 即跨页全局索引（引擎侧 select_candidate）
+                            callbacks.onGlobalCandidateSelect?.invoke(entry.globalIndex)
+                            viewModel.setCandidatePageExpanded(false)
+                        },
+                        onCandidateLongPress = { entry ->
+                            // 长按删除自造词：与候选栏共用确认弹窗
+                            val word = candidateState.value.expandedCandidates
+                                .getOrNull(entry.globalIndex)?.text
+                            if (!word.isNullOrEmpty()) {
+                                onHapticFeedback?.invoke()
+                                deletePending = DeletePendingWord(word) {
+                                    callbacks.onGlobalCandidateDelete?.invoke(entry.globalIndex)
+                                }
+                            }
+                        },
+                        onToggleSingleCharFilter = {
+                            onHapticFeedback?.invoke()
+                            viewModel.toggleSingleCharFilter()
+                        },
+                        onAssociationSelect = { index ->
+                            callbacks.onAssociationSelect?.invoke(index)
+                            viewModel.setCandidatePageExpanded(false)
+                        },
+                        onRailPinyinSelect = { index ->
+                            onHapticFeedback?.invoke()
+                            if (isT9Layout) {
+                                // 与九键键盘左栏同语义：切换音节选项，引擎重组后
+                                // 服务层重拉全量候选，展开页内容随之刷新
+                                t9Controller.firstOptions.getOrNull(index)?.let {
+                                    t9Controller.onChoiceSelected(it)
+                                }
+                            }
+                        },
+                        onCommitText = { text ->
+                            onHapticFeedback?.invoke()
+                            if (customRailSymbols != null) {
+                                // 九键/笔画左栏符号：与键盘本体左栏同路径（onKeyPress，
+                                // 由 rime punctuator 决定顶屏/上屏行为）
+                                callbacks.onKeyPress(text, false)
+                            } else {
+                                callbacks.onCommitText?.invoke(text)
+                            }
+                        },
+                        onDelete = {
+                            onHapticFeedback?.invoke()
+                            if (isT9Layout) {
+                                // 与九键键盘本体退格键（T9KeyboardLayout.handleDelete）
+                                // 完全同路径：T9 撤销模型（删未分配数字/撤销左栏选择/
+                                // 撤销上屏），buffer→rime 经 FlushRimeInput 同步；
+                                // 引擎不消费时才转服务层普通删除。此前直接走
+                                // onKeyPress("delete") 缺 flush，T9 buffer 已回退但
+                                // rime composition 不刷新，表现为连按多次才删掉
+                                t9Controller.onDeleted { result ->
+                                    when (result) {
+                                        T9InputController.DeleteResult.UNDO_COMMIT ->
+                                            t9Controller.clearRimeAndResend()
+                                        T9InputController.DeleteResult.NOT_CONSUMED ->
+                                            callbacks.onKeyPress("delete", false)
+                                        else -> {}
+                                    }
+                                }
+                            } else {
+                                callbacks.onKeyPress("delete", false)
+                            }
+                        },
+                        onEnter = {
+                            onHapticFeedback?.invoke()
+                            callbacks.onKeyPress("enter", false)
+                        },
+                    ),
+                    pageScrollEvents = viewModel.expandedPageScrollEvents,
+                    onHapticFeedback = onHapticFeedback,
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
             } else {
             val isMainKeyboard = page is KeyboardPage.Main
             if (isMainKeyboard) {
@@ -1101,7 +1051,7 @@ fun KeyboardView(
                                     seg.candidates.firstOrNull()?.char
                                 }.joinToString("")
                                 if (segText.isNotEmpty()) {
-                                    // 替换式上屏：活动区整体重写为最新识别结果（微信式边写边上屏）。
+                                    // 替换式上屏：活动区整体重写为最新识别结果（边写边上屏）。
                                     // 校验失败（光标漂移）时重置尾部状态，后续识别以追加模式重建
                                     val newTail = handwritingTail.dropLast(handwritingActiveLen) + segText
                                     val ok = callbacks.onHandwritingAutoCommit?.invoke(newTail, handwritingTail) ?: false

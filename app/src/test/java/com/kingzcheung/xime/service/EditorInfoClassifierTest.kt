@@ -102,6 +102,82 @@ class EditorInfoClassifierTest {
         )
     }
 
+    // ── isSecretEditor ──
+
+    @Test
+    fun `null输入框不算秘密框`() {
+        assertFalse(EditorInfoClassifier.isSecretEditor(null))
+    }
+
+    @Test
+    fun `普通文本框不算秘密框`() {
+        assertFalse(
+            EditorInfoClassifier.isSecretEditor(
+                editorInfo(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+            )
+        )
+    }
+
+    @Test
+    fun `NO_SUGGESTIONS不算秘密框_英文联想应放行`() {
+        assertFalse(
+            EditorInfoClassifier.isSecretEditor(
+                editorInfo(
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `TYPE_NULL算秘密框`() {
+        assertTrue(EditorInfoClassifier.isSecretEditor(editorInfo(InputType.TYPE_NULL)))
+    }
+
+    @Test
+    fun `文本密码框算秘密框`() {
+        assertTrue(
+            EditorInfoClassifier.isSecretEditor(
+                editorInfo(
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `可见密码框算秘密框`() {
+        assertTrue(
+            EditorInfoClassifier.isSecretEditor(
+                editorInfo(
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `网页密码框算秘密框`() {
+        assertTrue(
+            EditorInfoClassifier.isSecretEditor(
+                editorInfo(
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `数字密码框算秘密框`() {
+        assertTrue(
+            EditorInfoClassifier.isSecretEditor(
+                editorInfo(
+                    InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                )
+            )
+        )
+    }
+
     // ── isNumberEditor ──
 
     @Test

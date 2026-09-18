@@ -691,13 +691,16 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         } else {
                             displayCandidates.map { it.text } to displayCandidates.map { it.comment }
                         }
-                        val restricted = service.isEditorRestricted()
+                        // 秘密输入框（密码/终端）禁英文联想：联想会泄漏输入前缀，
+                        // 回删替换也会破坏受限宿主的输入。NO_SUGGESTIONS 只是宿主
+                        // 不要内联补全，候选栏联想仍提供（与退格/applyComposition 路径同口径）。
+                        val secret = service.isSecretEditor()
                         service.candidateState.value = service.candidateState.value.copy(
                             inputText = capturedInputText,
                             candidates = filteredTexts,
                             candidateComments = filteredComments,
                             isComposing = capturedInputText.isNotEmpty(),
-                            associationCandidates = if (restricted || ((capturedIsAscii || !service.isChineseMode) && pendingEnglish.isEmpty())) emptyList() else service.candidateState.value.associationCandidates,
+                            associationCandidates = if (secret || ((capturedIsAscii || !service.isChineseMode) && pendingEnglish.isEmpty())) emptyList() else service.candidateState.value.associationCandidates,
                             isShowingRecentClipboard = false,
                             hasNextPage = capturedHasNext,
                             hasPrevPage = capturedHasPrev,
@@ -707,9 +710,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                             FileLogger.i(XimeInputMethodService.TAG, "keyRouter UI refresh: ascii ${service.uiState.value.isAsciiMode}->$capturedIsAscii")
                         }
                         service.uiState.value = service.uiState.value.copy(isAsciiMode = capturedIsAscii)
-                        // 受限输入框（密码/终端/NO_SUGGESTIONS）不拉取英文联想：
-                        // 联想会泄漏输入前缀，回删替换机制也会破坏受限宿主的输入
-                        if (pendingEnglish.isNotEmpty() && !restricted && service.supportsEnglishCandidateReplace()) {
+                        if (pendingEnglish.isNotEmpty() && !secret && service.supportsEnglishCandidateReplace()) {
                             service.serviceScope.launch {
                                 val candidates = service.predictionManager.getEnglishAssociations(pendingEnglish, PredictionManager.MAX_ASSOCIATION_COUNT)
                                 withContext(Dispatchers.Main) {
@@ -825,7 +826,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                             candidateActions = emptyList()
                         )
                     }
-                    if (service.supportsEnglishCandidateReplace()) {
+                    if (!service.isSecretEditor() && service.supportsEnglishCandidateReplace()) {
                         service.serviceScope.launch {
                             val candidates = service.predictionManager.getEnglishAssociations(newPending, PredictionManager.MAX_ASSOCIATION_COUNT)
                             withContext(Dispatchers.Main) {
@@ -1364,11 +1365,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
         }
     }
 
-    /**
-     * 候选展开页长按删除自造词：按跨页全局索引删除（delete_candidate）。
-     * 删除后重拉全量候选并恢复当前页码（用户应停留在删除发生的页，
-     * 被删词消失、后续候选自然前移）。
-     */
+    /** 候选展开页长按删除自造词：按跨页全局索引删除，删除后重拉全量候选 */
     internal fun deleteCandidateGlobal(globalIndex: Int) {
         postRimeJob {
             val text = service.candidateState.value.expandedCandidates.getOrNull(globalIndex)?.text
@@ -1380,10 +1377,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
             )
             if (!ok) return@postRimeJob
             withContext(Dispatchers.Main) {
-                // updateUI 内部会重拉全量并重置页码，这里记录并恢复删除时的页
-                val keepStart = service.keyboardViewModel.expandedPageStart
                 service.updateUI()
-                service.keyboardViewModel.restoreExpandedPage(keepStart)
             }
         }
     }

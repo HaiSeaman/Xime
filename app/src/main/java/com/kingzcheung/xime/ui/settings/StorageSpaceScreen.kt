@@ -61,8 +61,8 @@ import com.kingzcheung.xime.viewmodel.StorageSpaceViewModel
 
 /**
  * 存储空间（设置 → 关于 → 存储空间）：分类统计数据目录占用并提供分类清除，
- * 交互对标微信"存储空间"——低风险数据（缓存/日志/编译缓存/模型/剪贴板）就地
- * 清理，需谨慎操作的数据（插件/方案词库）只统计并引导到对应管理页。
+ * 低风险数据（缓存/日志/编译缓存/模型/剪贴板）就地清理，需谨慎操作的数据
+ * （插件/方案词库）只统计并引导到对应管理页。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

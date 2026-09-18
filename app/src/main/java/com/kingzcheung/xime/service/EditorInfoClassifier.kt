@@ -44,6 +44,34 @@ internal object EditorInfoClassifier {
     }
 
     /**
+     * 秘密输入框：TYPE_NULL（终端等宿主要求原始按键语义，回删替换会破坏输入）
+     * 与密码类变体（联想会泄漏输入前缀）。英文联想/回删替换在此类框必须完全禁用。
+     * 注意 NO_SUGGESTIONS 不在此列：该 flag 只表示宿主不要系统内联补全，
+     * 候选栏英文联想仍应提供（否则搜索框等场景无英文联想，且与退格路径行为不一致）。
+     */
+    fun isSecretEditor(info: EditorInfo?): Boolean {
+        if (info == null) return false
+        val inputType = info.inputType
+        if (inputType == InputType.TYPE_NULL) return true
+        val cls = inputType and InputType.TYPE_MASK_CLASS
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
+        if (cls == InputType.TYPE_CLASS_TEXT) {
+            if (variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+            ) {
+                return true
+            }
+        }
+        if (cls == InputType.TYPE_CLASS_NUMBER &&
+            variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        ) {
+            return true
+        }
+        return false
+    }
+
+    /**
      * 纯数字类输入框（数字/电话/日期时间，且非密码）：适合自动弹出数字键盘。
      */
     fun isNumberEditor(info: EditorInfo?): Boolean {

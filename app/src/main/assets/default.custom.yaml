@@ -44,10 +44,12 @@ patch:
 
   key_binder:
     bindings:
+      # 禁止在此绑定分号/单引号选词（如 semicolon → 2、apostrophe → 3）。
+      # key_binder 优先级高于 speller，双拼方案（微软双拼等）用 ; 输入 ing、' 作音节
+      # 分隔符，一旦绑定，has_menu 时按键会被抢占，按 ; 直接选词上屏、无法组码
+      # （issue #884）。选词请用候选栏点击或数字键。
 #      - { when: has_menu, accept: comma, send: 2 }  # 候选2 用逗号选择 （修改的时候不要多加或少加空格，跟前面的对齐就好了）
 #      - { when: has_menu, accept: period, send: 3 } # 候选3 用句号选择
-      - { when: has_menu, accept: semicolon, send: 2 }  # 候选2 用分号
-      - { when: has_menu, accept: apostrophe, send: 3 } # 候选3 用单引号
 
       # 上下翻页 [ ]
       - { when: has_menu, accept: bracketleft, send: Page_Up }

@@ -343,8 +343,12 @@ object RimeConfigHelper {
     }
 
     /**
-     * default.custom.yaml 的基线对齐（纯函数）：把 page_size 强制对齐为 app 当前
-     * 设置值。注意这只是磁盘配置基线——方案自带的 menu/page_size（内置与第三方
+     * default.custom.yaml 的基线对齐（纯函数）：
+     * 1. 移除抢占双拼编码键的 key_binder 绑定——`semicolon`/`apostrophe` 在微软双拼
+     *    等方案中是合法编码键（`;` = ing，`'` 为音节分隔符），而 key_binder 优先级高于
+     *    speller，has_menu 时绑定会拦截按键，按 `;` 直接选词上屏、无法组码（issue #884）；
+     * 2. 把 page_size 强制对齐为 app 当前设置值。
+     * 注意 page_size 只是磁盘配置基线——方案自带的 menu/page_size（内置与第三方
      * 方案多为 PC 遗留默认 5，不适配手机）经 librime MergeTree 语义压过 default
      * 层，运行时的实际生效靠 JNI 层 setPageSize 直接注入（rime_jni.cc）。
      * 无需变化时返回 null。
@@ -352,22 +356,49 @@ object RimeConfigHelper {
     internal fun patchDefaultCustomContent(text: String, pageSize: Int): String? {
         val sep = if (text.contains("\r\n")) "\r\n" else "\n"
         val lines = text.lines()
-        val pageSizeIdx = lines.indexOfFirst { it.trimStart().startsWith("page_size:") }
-        if (pageSizeIdx >= 0) {
-            val raw = lines[pageSizeIdx].trimStart().removePrefix("page_size:")
-                .substringBefore('#').trim()
-            if (raw.toIntOrNull() == pageSize) return null
-            val indent = lines[pageSizeIdx].takeWhile { it == ' ' || it == '\t' }
-            val updated = lines.toMutableList()
-            updated[pageSizeIdx] = "${indent}page_size: $pageSize"
-            return updated.joinToString(sep)
-        }
-        val patchIdx = lines.indexOfFirst { it.trim() == "patch:" }
-        if (patchIdx < 0) return null
+        var changed = false
         val updated = lines.toMutableList()
-        updated.add(patchIdx + 1, "  menu:")
-        updated.add(patchIdx + 2, "    page_size: $pageSize")
-        return updated.joinToString(sep)
+
+        // 1. 清理与双拼编码键冲突的 key_binder 绑定（旧版模板/用户目录残留）
+        val kept = updated.filterNot { isConflictingKeyBindingLine(it) }
+        if (kept.size != updated.size) {
+            updated.clear()
+            updated.addAll(kept)
+            changed = true
+        }
+
+        // 2. 对齐 menu/page_size
+        val pageSizeIdx = updated.indexOfFirst { it.trimStart().startsWith("page_size:") }
+        if (pageSizeIdx >= 0) {
+            val raw = updated[pageSizeIdx].trimStart().removePrefix("page_size:")
+                .substringBefore('#').trim()
+            if (raw.toIntOrNull() != pageSize) {
+                val indent = updated[pageSizeIdx].takeWhile { it == ' ' || it == '\t' }
+                updated[pageSizeIdx] = "${indent}page_size: $pageSize"
+                changed = true
+            }
+        } else {
+            val patchIdx = updated.indexOfFirst { it.trim() == "patch:" }
+            if (patchIdx >= 0) {
+                updated.add(patchIdx + 1, "  menu:")
+                updated.add(patchIdx + 2, "    page_size: $pageSize")
+                changed = true
+            }
+        }
+
+        return if (changed) updated.joinToString(sep) else null
+    }
+
+    /**
+     * 判断一行是否为抢占分号/单引号的 key_binder 绑定（如
+     * `- { when: has_menu, accept: semicolon, send: 2 }`）。这类绑定在双拼方案下
+     * 会拦截 `;`（ing）/`'`（音节分隔符），必须从配置中移除。
+     */
+    private fun isConflictingKeyBindingLine(line: String): Boolean {
+        val trimmed = line.trim()
+        if (!trimmed.startsWith("-") || trimmed.startsWith("#")) return false
+        if (!trimmed.contains("send:")) return false
+        return trimmed.contains("accept: semicolon") || trimmed.contains("accept: apostrophe")
     }
 
     /**

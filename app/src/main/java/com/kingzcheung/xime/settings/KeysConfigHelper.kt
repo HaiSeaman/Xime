@@ -721,6 +721,12 @@ object KeysConfigHelper {
             // 九键/笔画手势（keyboard.t9.keys / keyboard.stroke.keys，custom 键级覆盖）
             _t9GestureConfigs = parseGesturesSection(context, "t9")
             _strokeGestureConfigs = parseGesturesSection(context, "stroke")
+            // 基线缓存已刷新，先落标准 26 键的行布局/手势，合并键方案再由
+            // setActiveKeyboardSchema 覆盖。不能只依赖 setActiveKeyboardSchema：
+            // 非合并键方案 section 为 null，与刚重置的 _activeMergedSection(null) 相等
+            // 会被提前 return，导致 xime.custom.yaml 的行布局/手势不生效（重新部署也无效）。
+            _zhRows = _zhRowsBase
+            _keyGestureConfig.value = _keyGestureConfigZhBase
             // 重新应用当前方案对应的合并键布局（上面重置了基线缓存）
             _activeMergedSection = null
             setActiveKeyboardSchema(_activeSchemaId)

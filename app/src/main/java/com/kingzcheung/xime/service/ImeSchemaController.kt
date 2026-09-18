@@ -392,7 +392,6 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
     internal fun toggleFloatingMode(enabled: Boolean, navBarDp: Int = 0) {
         val isLandscape = service.resources.configuration.screenWidthDp > service.resources.configuration.screenHeightDp
         SettingsPreferences.setFloatingMode(service, enabled, isLandscape)
-        SettingsPreferences.setFloatingMode(service, enabled, !isLandscape)
         val loadedX = SettingsPreferences.getFloatingOffsetX(service, isLandscape)
         val loadedY = SettingsPreferences.getFloatingOffsetY(service, isLandscape)
         val screenW = service.resources.configuration.screenWidthDp
