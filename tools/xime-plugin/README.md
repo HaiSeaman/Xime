@@ -1,6 +1,7 @@
 # xipm — Xime 插件工具链
 
-Xime 输入法插件开发 CLI（Rust 实现）。负责 TypeScript 编译、xipk 打包、插件骨架生成与清单校验。
+Xime 输入法插件开发 CLI（Rust 实现）。负责 TypeScript 编译、xipk 打包、插件骨架生成与清单校验，
+以及**免真机单测**（`xipm test`，内嵌 QuickJS + mock host）与**真机热调试**（`xipm dev`/`xipm logs`，adb）。
 
 - **插件源码**：TypeScript（`main.ts` + 可选 `libs/*.ts`，相对 import 自动内联）
 - **编译产物**：IIFE 单文件 `main.js`（无顶层 import/export，QuickJS 脚本模式直接执行）
@@ -28,6 +29,15 @@ xipm pack
 
 # 等价：编译全部插件（产物 build/plugin-js/，供测试/开发），不打包
 xipm build
+
+# 运行插件测试（内嵌 QuickJS，无需真机/Node；插件目录零参数）
+xipm test
+
+# 真机热调试（watch → 编译打包 → adb 推送 → 广播安装/重载 + 日志跟随）
+xipm dev plugins/my-plugin
+
+# 真机插件日志（实时跟随；--history 拉取历史错误）
+xipm logs plugins/my-plugin --history
 ```
 
 （零参数时自动识别：当前目录不是插件但存在 `plugins/` → 批量模式；
@@ -45,10 +55,13 @@ cargo run -- init my-plugin --type tool --parent /tmp/demo
 # 3. 编译（多文件 import 内联 → 单文件 main.js）
 cargo run -- build /tmp/demo/my-plugin --out /tmp/demo/out
 
-# 4. 校验清单
+# 4. 写测试（骨架自带 main.test.ts 示例）并运行（内嵌 QuickJS + mock host，无需真机）
+cargo run -- test /tmp/demo/my-plugin
+
+# 5. 校验清单
 cargo run -- check /tmp/demo/my-plugin
 
-# 5. 打包 xipk（内部会先编译一遍）
+# 6. 打包 xipk（内部会先编译一遍）
 cargo run -- pack /tmp/demo/my-plugin --out /tmp/demo/out --release-dir /tmp/demo/release
 # → /tmp/demo/release/my-plugin-0.1.0.xipk
 ```
@@ -99,6 +112,99 @@ xipm pack <插件目录> --with-assets            # 单插件：打包并拷贝�
 xipm check --all --plugins-dir plugins
 ```
 
+### `xipm test [DIR]`
+
+运行插件测试：`main.ts` 编译产物 + `main.test.ts` 在同一 QuickJS 引擎（与真机同引擎）
+加载，注入符合 v3 契约的 mock host，逐个执行用例。
+
+```bash
+xipm test plugins/my-plugin          # 单插件（插件目录内可零参数）
+xipm test                            # 仓库根零参数：批量（无测试文件的插件跳过）
+xipm test plugins/my-plugin --smoke  # 无 main.test.ts 时仅做加载冒烟
+```
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--all` / `--plugins-dir` | 批量模式 | 仓库根自动批量 |
+| `--out` | 编译产物根目录（测试基于产物运行） | `build/plugin-js` |
+| `--smoke` | 无测试文件时执行"加载 + 插件定义存在"冒烟 | 跳过 |
+
+测试 API（`main.test.ts`，全局注入、无需 import）：
+
+```ts
+test('名称', async () => {                  // 用例可 async
+  assert.equal(actual, expected, '说明');   // ok / equal / deepEqual / throws / rejects
+  __ximeMock.addHttpResponse('GET', url, { status: 200, text: 'pong' });
+  const resp = await host.http.request('GET', url, {});
+  assert.equal(resp.text, 'pong');
+  assert.equal(__ximeMock.httpRequests.length, 1);   // 请求记录
+});
+
+test('未 stub 的网络请求被拒绝', async () => {
+  await assert.rejects(host.http.request('GET', otherUrl, {}));
+});
+```
+
+- **确定性**：网络/WS/SSE 必须显式 stub（`__ximeMock.addHttpResponse/addWs/addSse`），
+  未注册即 reject `E_NETWORK`——绝不真实联网
+- **可断言**：`httpRequests` / `sentWs` / `asrEvents` / `quickSend` / `clipboard` 调用记录
+- **可控时钟**：`__ximeMock.setClock(epochSeconds)` 固定 `host.crypto.utcTime/epochSeconds`
+- **日志透出**：插件 `console.log/error` 前缀化输出到终端；失败用例显示断言信息与堆栈
+- **实现**：CLI 内嵌 QuickJS（rquickjs）+ mock host（async 服务 reject `XimeError`、
+  字节为 `Uint8Array`、资源指向插件 `resources/` 真实文件）
+
+### `xipm dev [DIR]`
+
+真机热调试循环：watch 插件源码 → 编译 + 打包 → `adb push` → 广播触发宿主
+**覆盖安装 + 重载**（debug 宿主）→ 同时跟随设备日志。
+
+```bash
+xipm dev plugins/my-plugin
+xipm dev --device <serial> --no-logs          # 多设备/无线调试；只热更新不跟日志
+```
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--package` | 应用包名 | `com.kingzcheung.xime` |
+| `--adb` | adb 路径（缺省 `$ADB` / `$ANDROID_HOME/platform-tools/adb` / PATH） | - |
+| `--device` | `adb -s` 设备序列号（无线调试：先 `adb pair`/`connect`） | - |
+| `--no-logs` | 不跟随设备日志 | 跟随 |
+| `--out` | 构建产物根目录（xipk 暂存 `<out>/dist`） | `build/plugin-dev` |
+
+- **宿主要求**：**最新** debug 构建（热安装组件仅在 debug source set；`./gradlew installDebug`）
+- **触发方式**：`am start` 拉起宿主内无界面 Activity（透明主题、完成后立即结束）——
+  相比广播不受 Android 后台执行限制（后台应用收自定义广播会被系统丢弃：
+  "Background execution not allowed"），宿主未使用键盘时也能可靠热更新
+- **不会被内置覆盖**：宿主 debug 启动会同步内置 assets 插件，但采用"仅内置版本更高才覆盖"
+  （版本守卫）——开发中的热更新版本不会被回滚；内置发版 bump 版本后仍会升级
+- **文件通道**：xipk 经 `adb shell -T` 管道写入宿主**内部私有目录**
+  `files/xipm-dev/`（绕开部分 ROM 对 `/sdcard/Android/data` 的访问限制），
+  广播/启动参数传入 `/data/user/0/<package>/files/xipm-dev/<name>.xipk`
+- **流程回执**：安装/重载结果双通道——
+  1. CLI 经 `run-as` 读取 `files/logs/xipm-dev-result.jsonl`（默认，不依赖 logcat，显示
+     `✓ 热安装成功` / `✗ 热安装失败：<原因>`；10s 无回执提示 installDebug）
+  2. logcat `INSTALL_OK` / `INSTALL_FAIL`（tag=`XipmDev`，dev 日志跟随中可见）
+
+### `xipm logs [DIR]`
+
+真机插件日志回显（读 `manifest.id` 过滤）：
+
+```bash
+xipm logs plugins/my-plugin              # 实时跟随（Ctrl-C 退出）
+xipm logs plugins/my-plugin --history    # 历史错误（宿主 errors.jsonl，run-as）
+xipm logs plugins/my-plugin --history --lines 100 --json
+```
+
+- **实时**：三通道（前两者不依赖 logcat，ROM 后台日志限流时依然可靠）——
+  1. **插件 console 落盘**（`dev-console.jsonl`，debug 宿主写入）：`console.log/error`
+     实时回显 `HH:MM:SS [log] ...`（error 红色）；启动时已有历史静默、之后只显示新增
+  2. **插件错误落盘**（`errors.jsonl`）：启动先提示最近 1 条，之后只输出新增；
+     内容含分类 + 操作 + `main.js:行号` 堆栈
+  3. logcat 跟随（宿主行为日志：加载/热更新/事件等含插件 id 的行）
+- **历史**：`adb exec-out run-as <package> cat files/logs/plugins/errors.jsonl`
+  解析展示（时间/分类/操作/消息/堆栈），`--json` 输出 JSON 行供 IDE/脚本集成
+- **注意**：`--history` 需要 debug 包（`run-as` 限制）与设备在线
+
 ### `xipm init <NAME>`
 
 生成插件骨架：
@@ -106,6 +212,7 @@ xipm check --all --plugins-dir plugins
 ```
 <parent>/<name>/
   main.ts            入口源码（含最小示例）
+  main.test.ts       测试骨架（xipm test 开箱可跑）
   manifest.json      清单模板（含中文注释）
   xime-plugin.d.ts   SDK 类型定义（host API + 插件契约 + 环境 API）
   tsconfig.json      类型检查配置（ES2020 / strict）
@@ -122,7 +229,8 @@ xipm init my-plugin --type tool --parent .
 
 ```
 plugins/my-plugin/
-  main.ts         源码（必须定义 globalThis.plugin = { ... }）
+  main.ts         源码（definePlugin + export default）
+  main.test.ts    测试（xipm test；不进 xipk 产物）
   libs/*.ts       可选拆分（相对 import，编译时内联进 main.js）
   manifest.json   清单（宿主解析；宽松 JSON 支持注释与尾逗号）
   resources/      资源文件（图片由宿主渲染，插件只拿路径）
@@ -249,3 +357,9 @@ cd tools/xime-plugin && cargo run -- check --all --plugins-dir ../../plugins
 | 插件加载失败 "未定义全局对象 plugin" | `main.ts` 必须定义 `globalThis.plugin = { ... }` |
 | 修改宿主主源码后测试行为未更新 | Gradle 中间产物缓存问题：删除 `plugin-core/build/intermediates/runtime_library_classes_dir` 后重跑 |
 | 中文文件名在 `unzip` 中乱码 | 条目已带 UTF-8 flag，实际解码正常（macOS `ditto` / Java `ZipFile` 验证通过） |
+| `xipm test` 报"未注册该请求的 stub" | 测试环境禁止真实联网：用 `__ximeMock.addHttpResponse` / `addWs` / `addSse` 显式 stub |
+| `xipm dev` 报"未检测到在线设备" | `adb devices` 确认授权；无线调试先 `adb pair <ip:port>` + `adb connect <ip:port>` |
+| `xipm dev` 报"不包含插件热安装组件" | 设备上不是最新 debug 包：`./gradlew installDebug` |
+| `xipm dev` 报"未收到设备回执" | 宿主为旧 debug 包（无回执落盘）；或安装线程未执行，用 `xipm logs <dir>` 查看设备日志 |
+| 插件 `console.log` 真机看不到 | 已由 console 落盘通道兜底（需最新 debug 宿主）；若仍无输出，确认插件确实执行到该行（如 `onTextCommitted` 需真实上屏触发） |
+| 广播触发无效（"Background execution not allowed"） | Android 后台执行限制会丢弃后台应用的自定义广播；`xipm dev` 已改用 `am start` 无界面 Activity，无需前台 |

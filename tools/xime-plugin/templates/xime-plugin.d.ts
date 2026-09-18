@@ -650,3 +650,85 @@ declare class TextDecoder {
 
 declare function atob(data: string): string;
 declare function btoa(data: string): string;
+
+// ============================================================
+// 测试环境（仅 `xipm test` 注入；真机运行不存在这些全局）
+// ============================================================
+
+/** 注册一个测试用例（fn 可为 async）。 */
+declare function test(name: string, fn: () => void | Promise<void>): void;
+
+declare const assert: {
+  ok(value: unknown, message?: string): void;
+  equal(actual: unknown, expected: unknown, message?: string): void;
+  deepEqual(actual: unknown, expected: unknown, message?: string): void;
+  throws(fn: () => void, message?: string): void;
+  /** 断言 Promise 被 reject（不校验错误内容）。 */
+  rejects(promise: Promise<unknown>, message?: string): Promise<void>;
+};
+
+interface XimeTestMockRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: Uint8Array | null;
+  text: string | null;
+  timeoutMillis?: number;
+}
+
+interface XimeTestMockResponse {
+  status?: number;
+  headers?: Record<string, string>;
+  text?: string;
+  body?: Uint8Array;
+}
+
+/** 测试环境的 mock host 控制入口：stub 注册、事件推动、调用记录断言。 */
+declare const __ximeMock: {
+  /** 预置 host.config（string → string）。 */
+  setConfig(key: string, value: string): void;
+  /** 固定 host.crypto.epochSeconds/utcTime 的时钟（秒）；0 = 真实时钟。 */
+  setClock(epochSeconds: number): void;
+  resetClock(): void;
+  /**
+   * 注册 HTTP stub。pattern 为精确 URL 或 (url) => boolean；
+   * resp 为静态响应或 async (req, url) => 响应。未 stub 的请求 reject
+   * XimeError E_NETWORK（绝不真实联网）。
+   */
+  addHttpResponse(
+    method: string,
+    pattern: string | ((url: string) => boolean),
+    resp:
+      | XimeTestMockResponse
+      | ((
+          req: XimeTestMockRequest,
+          url: string,
+        ) => XimeTestMockResponse | Promise<XimeTestMockResponse>),
+  ): void;
+  /** 已发起的 HTTP 请求记录（断言用）。 */
+  httpRequests: XimeTestMockRequest[];
+  /** 注册 SSE 流 stub：stream() 后按序投递 onData（data 帧）→ onDone。 */
+  addSse(url: string, events: Array<{ data: string; event?: string }>): void;
+  /** 向已建立的 SSE 会话手动推送一帧（plugin.sse.onData）。 */
+  pushSse(sessionId: number, data: string): void;
+  /** 注册 WS stub；connect 成功后可用 wsOpen/wsMessage/... 推动事件槽。 */
+  addWs(url: string): void;
+  wsOpen(): void;
+  wsMessage(text: string): void;
+  wsBinary(data: Uint8Array): void;
+  wsError(message: string): void;
+  wsClose(): void;
+  /** host.ws.sendText/sendBinary 已入队的记录（断言用）。 */
+  readonly sentWs: Array<
+    { type: 'text'; text: string } | { type: 'binary'; data: Uint8Array }
+  >;
+  /** host.asr.emit* 事件记录（断言用）。 */
+  asrEvents: Array<{
+    type: string;
+    text?: string;
+    message?: string;
+    state?: number;
+  }>;
+  setQuickSend(items: XimeQuickSendItem[]): void;
+  setClipboard(text: string): void;
+};

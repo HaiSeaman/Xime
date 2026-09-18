@@ -62,6 +62,10 @@ class XimeApplication : Application(), ImageLoaderFactory {
         }
 
         val isDebug = BuildConfig.DEBUG
+        if (isDebug) {
+            // 插件 console 日志落盘（xipm dev/logs 轮询回显，规避 ROM 后台日志限流）
+            com.kingzcheung.xime.plugin.PluginDevConsoleFileSink.install(this)
+        }
         PluginManager.configStoreFactory =
             PluginManager.PluginConfigStoreFactory { app, pluginId ->
                 PluginConfigStoreImpl(app, pluginId)

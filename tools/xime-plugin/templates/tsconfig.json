@@ -10,5 +10,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": []
   },
-  "include": ["main.ts", "libs/**/*.ts", "xime-plugin.d.ts"]
+  "include": ["main.ts", "main.test.ts", "libs/**/*.ts", "xime-plugin.d.ts"]
 }

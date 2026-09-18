@@ -182,6 +182,8 @@ const plugin = definePlugin({
   // ===== 下行事件（manifest events 声明） =====
   events: {
     onTextCommitted(e: XimeTextCommittedEvent): void {
+      console.log("???")
+
       const sessionChars = e.sessionTotalChars || 0;
       let delta = sessionChars - (lastSeenChars === null ? sessionChars : lastSeenChars);
       lastSeenChars = sessionChars;
@@ -250,6 +252,7 @@ const plugin = definePlugin({
 
     onItemClick(_input: XimePanelItemClickEvent): void {
       // passive 面板点击节点不上屏
+
     },
 
     onAction(input: XimePanelActionEvent): void {

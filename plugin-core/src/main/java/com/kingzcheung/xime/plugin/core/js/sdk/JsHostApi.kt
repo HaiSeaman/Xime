@@ -64,10 +64,13 @@ class JsHostApiImpl(
 
     override fun log(message: String) {
         android.util.Log.d("JsPlugin", "[$pluginId] $message")
+        // 调试落盘通道（仅 app debug 构建注册；release Noop）——规避 ROM 后台日志限流
+        PluginDevConsole.log(pluginId, "log", message)
     }
 
     override fun logError(message: String) {
         android.util.Log.e("JsPlugin", "[$pluginId] $message")
+        PluginDevConsole.log(pluginId, "error", message)
         com.kingzcheung.xime.plugin.core.security.PluginErrorLog.logError(
             pluginId = pluginId,
             operation = "插件运行错误",

@@ -17,8 +17,11 @@
 - 打包全部 xipk： `xipm pack`（仓库根零参数；产物 build/plugin-release/*.xipk）
 - 构建/打包单个插件： 在插件目录内运行 `xipm build` / `xipm pack`
 - 打包并同步内置插件到 app assets： `bash scripts/build-plugins.sh --with-assets`
-- 新建插件骨架： `xipm init <name> --type tool`
+- 新建插件骨架： `xipm init <name> --type tool`（自带 main.test.ts 测试骨架）
 - 校验清单： `xipm check`（仓库根零参数批量）
+- 运行插件测试（免真机；CLI 内嵌 QuickJS + mock host，与真机同引擎）： `xipm test`（仓库根零参数批量，无 main.test.ts 跳过；`--smoke` 做加载冒烟）
+- 真机热调试（watch → 编译打包 → adb 管道写入内部目录 → am start 热安装/重载 + 日志跟随 + 落盘回执）： `xipm dev <插件目录>`（需**最新** debug 宿主 + adb；无设备/旧包时快速失败）
+- 真机插件日志回显： `xipm logs <插件目录>`（实时 `JsPlugin`/`PluginErrorLog` tag）；`--history` 读宿主 errors.jsonl（分类/行号/堆栈）
 - 类型检查（可选）： `npx -p typescript tsc -p tsconfig.json --noEmit`
 - SDK 类型定义： `tools/xime-plugin/templates/xime-plugin.d.ts`
 - **完整 CLI 用法**： [tools/xime-plugin/README.md](tools/xime-plugin/README.md)

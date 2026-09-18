@@ -22,6 +22,9 @@ pub struct BuildOutcome {
 /// 插件源码入口（TS）。
 const SOURCE_ENTRY: &str = "main.ts";
 
+/// 插件测试入口（TS）：仅测试用，不进 xipk 产物。
+pub const TEST_ENTRY: &str = "main.test.ts";
+
 /// 构建单个插件：`<plugin_dir>/main.ts` → `<out_root>/<plugin_name>/main.js`，
 /// 并复制 manifest.json 与 resources/（xipk 打包与测试加载均基于该产物目录）。
 pub async fn build_plugin(plugin_dir: &Path, out_root: &Path, minify: bool) -> anyhow::Result<BuildOutcome> {
@@ -101,18 +104,67 @@ pub async fn build_all(plugins_root: &Path, out_root: &Path, minify: bool) -> an
 /// 等价于 `globalThis.plugin`，与宿主契约（入口脚本定义全局对象 plugin）一致。
 /// 插件源码因此可以写成标准 TS 模块（`export default {...} satisfies XimePlugin`）。
 async fn bundle_ts(plugin_dir: &Path, out_dir: &Path, minify: bool) -> anyhow::Result<()> {
+    bundle_entry(
+        plugin_dir,
+        out_dir,
+        SOURCE_ENTRY,
+        "main",
+        "plugin",
+        minify,
+        Some(DEFINE_PLUGIN_SHIM),
+        OutputExports::Default,
+    )
+    .await
+}
+
+/// 打包测试入口：`<plugin_dir>/main.test.ts` → `<out_dir>/test.js`（IIFE，副作用执行；
+/// 全局 test/assert 由测试环境注入，源码无需 import/export）。
+pub async fn bundle_test_js(plugin_dir: &Path, out_dir: &Path) -> anyhow::Result<PathBuf> {
+    // rolldown 的 cwd/input 需可解析路径：与 build_plugin 一致先规范化
+    let plugin_dir = plugin_dir
+        .canonicalize()
+        .map_err(|e| anyhow::anyhow!("插件目录不存在: {} ({e})", plugin_dir.display()))?;
+    let entry = plugin_dir.join(TEST_ENTRY);
+    if !entry.is_file() {
+        anyhow::bail!("测试入口不存在: {}", entry.display());
+    }
+    bundle_entry(
+        &plugin_dir,
+        out_dir,
+        TEST_ENTRY,
+        "test",
+        "test",
+        false,
+        None,
+        OutputExports::None,
+    )
+    .await?;
+    Ok(out_dir.join("test.js"))
+}
+
+/// 通用 rolldown 打包：TS 模块（多文件相对 import 内联）→ IIFE 单文件。
+async fn bundle_entry(
+    plugin_dir: &Path,
+    out_dir: &Path,
+    entry: &str,
+    file_name: &str,
+    global_name: &str,
+    minify: bool,
+    banner: Option<&str>,
+    exports: OutputExports,
+) -> anyhow::Result<()> {
     let mut bundler = Bundler::new(BundlerOptions {
         input: Some(vec![InputItem {
-            name: Some("main".to_string()),
-            import: SOURCE_ENTRY.to_string(),
+            name: Some(file_name.to_string()),
+            import: entry.to_string(),
         }]),
         cwd: Some(plugin_dir.to_path_buf()),
         format: Some(OutputFormat::Iife),
-        name: Some("plugin".to_string()),
-        exports: Some(OutputExports::Default),
+        name: Some(global_name.to_string()),
+        exports: Some(exports),
         // compress + 局部变量 mangle（属性名不混淆：宿主契约方法名/事件字段名必须保留）
         minify: Some(RawMinifyOptions::Bool(minify)),
-        banner: Some(AddonOutputOption::String(Some(DEFINE_PLUGIN_SHIM.to_string()))),
+        banner: Some(AddonOutputOption::String(banner.map(|s| s.to_string()))),
         dir: Some(out_dir.to_string_lossy().into_owned()),
         platform: Some(Platform::Browser),
         ..Default::default()
@@ -124,9 +176,9 @@ async fn bundle_ts(plugin_dir: &Path, out_dir: &Path, minify: bool) -> anyhow::R
         .await
         .map_err(|e| anyhow::anyhow!("TS 编译失败: {e:?}"))?;
 
-    let entry = out_dir.join("main.js");
-    if !entry.is_file() {
-        anyhow::bail!("编译未生成 main.js：{}", entry.display());
+    let out = out_dir.join(format!("{file_name}.js"));
+    if !out.is_file() {
+        anyhow::bail!("编译未生成 {file_name}.js：{}", out.display());
     }
     Ok(())
 }

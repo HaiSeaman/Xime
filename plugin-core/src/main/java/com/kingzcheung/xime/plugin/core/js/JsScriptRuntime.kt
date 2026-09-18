@@ -416,7 +416,9 @@ class JsScriptRuntime(
                     var a = args[i];
                     parts.push(typeof a === 'string' ? a : String(a));
                   }
-                  var msg = '[' + level + '] ' + parts.join(' ');
+                  // level 与 message 分离：logcat 级别/落盘 level 字段已表达级别，
+                  // 不混入消息体（避免终端回显出现 [log] [log] 双前缀）
+                  var msg = parts.join(' ');
                   if (level === 'error') { globalThis.host.logError(msg); }
                   else { globalThis.host.log(msg); }
                 };

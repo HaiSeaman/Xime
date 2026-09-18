@@ -1,6 +1,10 @@
 mod build;
+mod dev;
+mod engine_js;
+mod engine_state;
 mod manifest;
 mod pack;
+mod test_engine;
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +29,12 @@ enum Commands {
     Pack(PackArgs),
     /// 校验：manifest.json（宽松 JSON）字段与格式检查
     Check(CheckArgs),
+    /// 运行插件测试（内嵌 QuickJS + mock host，无需真机）：main.test.ts → 结果
+    Test(TestArgs),
+    /// 真机热调试：watch 源码 → 编译打包 → adb 推送 → 广播安装/重载 → 日志跟随
+    Dev(DevArgs),
+    /// 真机插件日志：实时跟随（logcat）或历史错误（errors.jsonl）
+    Logs(LogsArgs),
     /// 创建插件骨架（main.ts + manifest.json + SDK 类型 + tsconfig）
     Init(InitArgs),
 }
@@ -98,6 +108,69 @@ struct InitArgs {
     parent: PathBuf,
 }
 
+#[derive(Args)]
+struct DevArgs {
+    /// 插件目录（含 main.ts + manifest.json）；缺省为当前目录
+    dir: Option<PathBuf>,
+    /// 应用包名
+    #[arg(long, default_value = "com.kingzcheung.xime")]
+    package: String,
+    /// adb 可执行文件路径（缺省：$ADB / $ANDROID_HOME/platform-tools/adb / PATH）
+    #[arg(long)]
+    adb: Option<PathBuf>,
+    /// 指定设备序列号（adb -s；多设备/无线调试时使用）
+    #[arg(long)]
+    device: Option<String>,
+    /// 不跟随设备日志（只做热更新循环）
+    #[arg(long)]
+    no_logs: bool,
+    /// 构建产物根目录（xipk 暂存 <out>/dist）
+    #[arg(long, default_value = "build/plugin-dev")]
+    out: PathBuf,
+}
+
+#[derive(Args)]
+struct LogsArgs {
+    /// 插件目录（读 manifest.id 过滤日志）；缺省为当前目录
+    dir: Option<PathBuf>,
+    /// 应用包名
+    #[arg(long, default_value = "com.kingzcheung.xime")]
+    package: String,
+    /// adb 可执行文件路径
+    #[arg(long)]
+    adb: Option<PathBuf>,
+    /// 指定设备序列号
+    #[arg(long)]
+    device: Option<String>,
+    /// 读取历史错误（宿主 errors.jsonl，run-as；需要 debug 包）
+    #[arg(long)]
+    history: bool,
+    /// --history 展示的最新条数
+    #[arg(long, default_value_t = 50)]
+    lines: usize,
+    /// --history 输出 JSON 行（脚本/IDE 集成）
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct TestArgs {
+    /// 插件目录（含 main.ts + main.test.ts）；缺省为当前目录
+    dir: Option<PathBuf>,
+    /// 批量测试指定根目录下的所有插件（无测试文件的按冒烟通过计）
+    #[arg(long)]
+    all: bool,
+    /// 批量模式：插件根目录
+    #[arg(long, default_value = "plugins")]
+    plugins_dir: PathBuf,
+    /// 编译产物根目录（同 build --out；测试基于编译产物运行）
+    #[arg(long, default_value = "build/plugin-js")]
+    out: PathBuf,
+    /// 无 main.test.ts 时执行冒烟测试（加载 + 基本槽检查），默认跳过
+    #[arg(long)]
+    smoke: bool,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -105,6 +178,26 @@ async fn main() -> anyhow::Result<()> {
         Commands::Build(args) => run_build(args).await,
         Commands::Pack(args) => run_pack(args).await,
         Commands::Check(args) => run_check(args),
+        Commands::Test(args) => run_test(args).await,
+        Commands::Dev(args) => dev::run_dev(dev::DevArgs {
+            dir: args.dir,
+            package: args.package,
+            adb: args.adb,
+            device: args.device,
+            no_logs: args.no_logs,
+            out: args.out,
+        })
+        .await,
+        Commands::Logs(args) => dev::run_logs(dev::LogsArgs {
+            dir: args.dir,
+            package: args.package,
+            adb: args.adb,
+            device: args.device,
+            history: args.history,
+            lines: args.lines,
+            json: args.json,
+        })
+        .await,
         Commands::Init(args) => run_init(args),
     }
 }
@@ -240,6 +333,60 @@ fn run_check(args: CheckArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn run_test(args: TestArgs) -> anyhow::Result<()> {
+    let plugin_dirs = match resolve_mode(args.all, &args.dir, &args.plugins_dir) {
+        Mode::All => scan_plugin_dirs(&args.plugins_dir)?,
+        Mode::Single(dir) => vec![dir],
+    };
+    if plugin_dirs.is_empty() {
+        anyhow::bail!("未找到插件目录（{} 下需含 manifest.json）", args.plugins_dir.display());
+    }
+
+    let mut passed_total = 0usize;
+    let mut failed_total = 0usize;
+    for dir in &plugin_dirs {
+        println!("▶ {}", dir.display());
+        let outcome = build::build_plugin(dir, &args.out, false).await?;
+        let dir = dir.clone();
+        let result = tokio::time::timeout(
+            test_engine::TEST_TIMEOUT,
+            test_engine::run_plugin_tests(&dir, &outcome.out_dir, &outcome.manifest, args.smoke),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(Some(cases))) => {
+                if cases.is_empty() {
+                    println!("  {} 冒烟：加载成功（无测试用例）", engine_js::green("✓"));
+                } else {
+                    let (p, f) = test_engine::print_results(&cases);
+                    passed_total += p;
+                    failed_total += f;
+                }
+            }
+            Ok(Ok(None)) => {
+                println!("  （无 main.test.ts，已跳过；--smoke 可启用加载冒烟）");
+            }
+            Ok(Err(e)) => {
+                failed_total += 1;
+                eprintln!("  {} 测试执行失败: {e:#}", engine_js::red("✗"));
+            }
+            Err(_) => {
+                failed_total += 1;
+                eprintln!("  {} 测试超时（>{}s，疑似死循环或挂起）",
+                    engine_js::red("✗"), test_engine::TEST_TIMEOUT.as_secs());
+            }
+        }
+        println!();
+    }
+
+    if failed_total > 0 {
+        anyhow::bail!("{} 个插件测试失败", failed_total);
+    }
+    println!("{} 全部用例通过（{passed_total} 个）", engine_js::green("✓"));
+    Ok(())
+}
+
 fn run_init(args: InitArgs) -> anyhow::Result<()> {
     let target = args.parent.join(&args.name);
     if target.exists() {
@@ -255,6 +402,7 @@ fn run_init(args: InitArgs) -> anyhow::Result<()> {
         .replace("{{TYPE}}", &args.r#type);
     std::fs::write(target.join("manifest.json"), manifest_text)?;
     std::fs::write(target.join("main.ts"), include_str!("../templates/main.ts"))?;
+    std::fs::write(target.join("main.test.ts"), include_str!("../templates/main.test.ts"))?;
     std::fs::write(
         target.join("xime-plugin.d.ts"),
         include_str!("../templates/xime-plugin.d.ts"),
@@ -263,6 +411,6 @@ fn run_init(args: InitArgs) -> anyhow::Result<()> {
     std::fs::write(target.join(".gitignore"), "dist/\n")?;
 
     println!("✓ 已创建插件骨架 {}", target.display());
-    println!("  下一步：xipm build {} --out dist", target.display());
+    println!("  下一步：xipm test .（内嵌 QuickJS + mock host，无需真机）与 xipm build --out dist");
     Ok(())
 }

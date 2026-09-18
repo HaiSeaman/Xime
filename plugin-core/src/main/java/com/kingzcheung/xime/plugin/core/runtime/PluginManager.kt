@@ -218,7 +218,11 @@ object PluginManager {
         }
     }
 
-    suspend fun installPluginFromAssets(assetsPath: String, forceOverwrite: Boolean = true): Boolean {
+    suspend fun installPluginFromAssets(
+        assetsPath: String,
+        forceOverwrite: Boolean = true,
+        onlyIfNewer: Boolean = false,
+    ): Boolean {
         return try {
             val context = requireContext().application
             val pluginFile = File(context.cacheDir, "temp_plugin.xipk")
@@ -227,7 +231,9 @@ object PluginManager {
                     input.copyTo(output)
                 }
             }
-            val result = installerManager.installPlugin(pluginFile, forceOverwrite, source = PluginSource.ASSET)
+            val result = installerManager.installPlugin(
+                pluginFile, forceOverwrite, onlyIfNewer = onlyIfNewer, source = PluginSource.ASSET
+            )
             pluginFile.delete()
             result is com.kingzcheung.xime.plugin.core.runtime.installer.InstallerManager.InstallResult.Success
         } catch (e: Exception) {
@@ -248,7 +254,8 @@ object PluginManager {
             for (fileName in assetFiles) {
                 if (fileName.endsWith(".xipk")) {
                     val assetPath = "$assetsDir/$fileName"
-                    if (installPluginFromAssets(assetPath, forceOverwrite = true)) {
+                    // 内置同步加版本守卫：不降级覆盖（保护 dev 热更新）
+                    if (installPluginFromAssets(assetPath, forceOverwrite = true, onlyIfNewer = true)) {
                         installedCount++
                         Log.d(TAG, "Installed: $fileName")
                     } else {

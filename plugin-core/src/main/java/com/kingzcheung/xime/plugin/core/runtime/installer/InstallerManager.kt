@@ -300,6 +300,7 @@ class InstallerManager(
     suspend fun installPlugin(
         pluginFile: File,
         forceOverwrite: Boolean = false,
+        onlyIfNewer: Boolean = false,
         source: PluginSource = PluginSource.FILE
     ): InstallResult = withContext(Dispatchers.IO) {
         if (!pluginFile.exists()) {
@@ -349,6 +350,16 @@ class InstallerManager(
 
         // JS 插件无版本号概念：只有首次安装或强制覆盖才重新解压
         if (!forceOverwrite && existingPlugin != null) {
+            return@withContext InstallResult.Success(existingPlugin)
+        }
+
+        // onlyIfNewer（内置 assets 启动同步）：已装版本 >= 本次包版本时保留已装，
+        // 避免 debug 启动覆盖开发中的热更新（热更新版本号通常与内置相同）。
+        if (existingPlugin != null && onlyIfNewer &&
+            com.kingzcheung.xime.plugin.core.util.VersionUtil.compare(
+                pluginConfig.version, existingPlugin.versionName
+            ) <= 0
+        ) {
             return@withContext InstallResult.Success(existingPlugin)
         }
 
