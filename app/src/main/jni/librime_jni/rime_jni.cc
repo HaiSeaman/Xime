@@ -33,11 +33,13 @@
 //      （Debug=1, Release=0）。Release 下宏展开为空语句，零开销。
 //   2) 运行时：Debug 构建保留运行时开关 g_rime_jni_verbose_logging，
 //      Kotlin 可通过 nativeSetVerboseLogging 手动切换，开发时不用重编。
+//      默认关闭：打字高频路径的 Candidate[...] 等日志每次按键数十行，
+//      需要排查时再在设置/代码中打开。
 #ifndef RIME_JNI_VERBOSE_LOGGING
 #define RIME_JNI_VERBOSE_LOGGING 0
 #endif
 #if RIME_JNI_VERBOSE_LOGGING == 1
-static volatile bool g_rime_jni_verbose_logging = true;
+static volatile bool g_rime_jni_verbose_logging = false;
 #define LOGI(...) do { if (g_rime_jni_verbose_logging) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); } while (0)
 #define LOGD(...) do { if (g_rime_jni_verbose_logging) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__); } while (0)
 #else

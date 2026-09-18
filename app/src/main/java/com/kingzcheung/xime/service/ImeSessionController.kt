@@ -65,7 +65,7 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
                 inputText.isEmpty() -> ""
                 else -> service.candidateState.value.preeditText
             }
-            FileLogger.i(
+            FileLogger.d(
                 XimeInputMethodService.TAG,
                 "T9 display: enginePreedit='$preeditText' rawPreedit='$rawPreedit' input='$inputText' partials=${service.t9PartialSegments.size}"
             )

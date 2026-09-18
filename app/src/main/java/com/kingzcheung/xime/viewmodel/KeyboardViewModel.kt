@@ -327,10 +327,10 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
             }
             is KeyboardDispatchAction.AsciiModeChanged -> {
                 if (current is KeyboardViewState.Overlay) {
-                    FileLogger.i("XimeKeyboard", "AsciiModeChanged skipped: current=$current (overlay)")
+                    FileLogger.d("XimeKeyboard", "AsciiModeChanged skipped: current=$current (overlay)")
                     Triple(current, _page.value, _keyboardState.value)
                 } else if (current is KeyboardViewState.NumberPanel || current is KeyboardViewState.CommonSymbolPanel) {
-                    FileLogger.i("XimeKeyboard", "AsciiModeChanged skipped: current=$current (panel)")
+                    FileLogger.d("XimeKeyboard", "AsciiModeChanged skipped: current=$current (panel)")
                     Triple(current, _page.value, _keyboardState.value)
                 } else if (!action.isAsciiMode && action.schemaId == "handwriting") {
                     Triple(KeyboardViewState.Handwriting, KeyboardPage.Main(MainType.HANDWRITING), KeyboardLayoutState.Chinese)
@@ -343,7 +343,7 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
                         is KeyboardLayoutState.Stroke -> KeyboardViewState.StrokeFull
                         else -> KeyboardViewState.ChineseFull
                     }
-                    FileLogger.i("XimeKeyboard", "AsciiModeChanged dispatch: current=$current, ascii=${action.isAsciiMode}, schemaId=${action.schemaId}, -> $vs / $kb")
+                    FileLogger.d("XimeKeyboard", "AsciiModeChanged dispatch: current=$current, ascii=${action.isAsciiMode}, schemaId=${action.schemaId}, -> $vs / $kb")
                     Triple(vs, KeyboardPage.Main(MainType.FULL), kb)
                 }
             }
@@ -457,7 +457,7 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         _keyboardState.value = state
         _syncViewState()
         if (prevKb != state) {
-            FileLogger.i("XimeKeyboard", "setKeyboardState: $prevKb -> $state, vs=${_viewState.value}, page=${_page.value}")
+            FileLogger.d("XimeKeyboard", "setKeyboardState: $prevKb -> $state, vs=${_viewState.value}, page=${_page.value}")
         }
     }
     

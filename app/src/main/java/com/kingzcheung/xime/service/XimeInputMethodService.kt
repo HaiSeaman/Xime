@@ -907,29 +907,48 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             .firstOrNull { it.id == pluginId }?.name ?: pluginId
         val display = ExtensionManager.getAllInstalledPlugins()
             .firstOrNull { it.id == pluginId }?.capabilities?.tool?.display
-        val pluginState = (ExtensionManager.getPluginById(pluginId) as? ToolPlugin)
-            ?.getPanelState(contextText)
-        val prefill = pluginState?.inputText?.takeIf { it.isNotBlank() } ?: contextText
+        val epoch = uiState.value.toolPanelRequestEpoch + 1
         uiState.value = uiState.value.copy(
             toolPanelVisible = true,
             toolPanelInputFocused = display != ToolResult.PASSIVE,
             toolPanelPluginId = pluginId,
             toolPanelTitle = pluginName,
-            toolPanelPrefillText = prefill,
-            toolPanelItems = pluginState?.items ?: emptyList(),
+            toolPanelPrefillText = contextText,
+            toolPanelItems = emptyList(),
             toolPanelDisplay = display?.name,
-            toolPanelUiNodes = pluginState?.ui,
-            toolPanelRequestEpoch = uiState.value.toolPanelRequestEpoch + 1,
+            toolPanelUiNodes = null,
+            toolPanelLoading = true,
+            toolPanelRequestEpoch = epoch,
             enterKeyText = if (display == ToolResult.PASSIVE) "发送" else "生成",
         )
+        serviceScope.launch(Dispatchers.IO) {
+            // runCatching：插件异常（超时/中毒/网络失败）时不卡 loading，面板恢复可交互
+            val state = runCatching {
+                (ExtensionManager.getPluginById(pluginId) as? ToolPlugin)
+                    ?.getPanelState(contextText)
+            }.getOrNull()
+            val prefill = state?.inputText?.takeIf { it.isNotBlank() } ?: contextText
+            withContext(Dispatchers.Main) {
+                if (uiState.value.toolPanelRequestEpoch != epoch || !uiState.value.toolPanelVisible) {
+                    return@withContext
+                }
+                uiState.value = uiState.value.copy(
+                    toolPanelPrefillText = prefill,
+                    toolPanelItems = state?.items ?: emptyList(),
+                    toolPanelUiNodes = state?.ui,
+                    toolPanelLoading = false,
+                )
+                if (display != ToolResult.PASSIVE) {
+                    ToolPanelEditTextHolder.editText?.let { et ->
+                        et.setText(prefill)
+                        et.setSelection(prefill.length)
+                    }
+                }
+            }
+        }
         if (display == ToolResult.PASSIVE) {
             // 纯展示面板与表情/符号同级：Overlay 全屏覆盖键盘，不撑高候选栏上方区域
             keyboardViewModel.showOverlay(OverlayRoute.ToolPanel)
-        } else {
-            ToolPanelEditTextHolder.editText?.let { et ->
-                et.setText(prefill)
-                et.setSelection(prefill.length)
-            }
         }
     }
 
@@ -1272,7 +1291,6 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 // 不再把已有差异（标准 44dp / 手势 16dp）强行垫平。
                 val minBottomDp = 18
                 val activeBottomDp = if (bottomSpaceDp == 0) minBottomDp else bottomSpaceDp
-                android.util.Log.d("ImeWindowInsets", "viewState=${bottomInsetPxState.value} rawDp=$rawDp shrink=$bottomInsetShrinkDp extra=$extraShrinkDp activeBottomDp=$activeBottomDp")
                 val navBarDp = activeBottomDp.dp
                 val hasNavBar = navBarDp > 0.dp
 

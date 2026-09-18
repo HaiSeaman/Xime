@@ -85,10 +85,8 @@ class PluginLifecycleManager(
 
         var successCount = 0
         for (plugin in enabledPlugins) {
-            Log.d(TAG, "Attempting to load plugin: ${plugin.id}")
             if (launchSinglePlugin(plugin.id)) {
                 successCount++
-                Log.d(TAG, "Successfully loaded: ${plugin.id}")
             } else {
                 Log.w(TAG, "Failed to load: ${plugin.id}")
             }
@@ -98,7 +96,6 @@ class PluginLifecycleManager(
     }
 
     private suspend fun launchSinglePlugin(pluginId: String): Boolean {
-        Log.d(TAG, "launchSinglePlugin: $pluginId")
         val pluginInfo = pluginRegistry.getPluginById(pluginId)
         if (pluginInfo == null) {
             Log.w(TAG, "Plugin info not found: $pluginId")
@@ -112,7 +109,6 @@ class PluginLifecycleManager(
             Log.w(TAG, "Plugin $pluginId 不兼容当前主应用版本，拒绝加载")
             return false
         }
-        Log.d(TAG, "Plugin info: path=${pluginInfo.path}, entryScript=${pluginInfo.entryScript}")
 
         val loadedPlugin = loadPlugin(pluginInfo)
         if (loadedPlugin == null) {
@@ -120,7 +116,6 @@ class PluginLifecycleManager(
             return false
         }
         loadedPlugins[pluginId] = loadedPlugin
-        Log.d(TAG, "Plugin loaded into memory: $pluginId")
 
         val instance = instantiatePlugin(loadedPlugin)
         if (instance == null) {
@@ -129,7 +124,7 @@ class PluginLifecycleManager(
             return false
         }
         pluginInstances[pluginId] = instance
-        Log.d(TAG, "Plugin instance created: $pluginId")
+        Log.d(TAG, "Loaded: $pluginId")
 
         return true
     }
@@ -141,7 +136,6 @@ class PluginLifecycleManager(
 
     private fun loadPlugin(plugin: PluginInfo): LoadedPluginInfo? {
         return try {
-            Log.d(TAG, "loadPlugin: ${plugin.id}, path=${plugin.path}")
             val entryFile = File(plugin.path)
             if (!entryFile.exists()) {
                 Log.w(TAG, "Plugin entry script not found: ${plugin.path}")
@@ -176,7 +170,6 @@ class PluginLifecycleManager(
 
     private fun instantiatePlugin(loadedPlugin: LoadedPluginInfo): IPluginEntryClass? {
         val plugin = loadedPlugin.pluginInfo
-        Log.d(TAG, "Instantiating JS plugin: ${plugin.id}")
         return try {
             val pluginContext = PluginContext(
                 application = application,
@@ -216,7 +209,6 @@ class PluginLifecycleManager(
                     )
             }
             adapter.onLoad(pluginContext)
-            Log.d(TAG, "JS plugin ${plugin.id} onLoad called successfully")
             adapter
         } catch (e: Exception) {
             Log.e(TAG, "Failed to instantiate JS plugin ${plugin.id}", e)

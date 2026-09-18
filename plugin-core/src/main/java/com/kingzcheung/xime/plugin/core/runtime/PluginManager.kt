@@ -219,7 +219,6 @@ object PluginManager {
     }
 
     suspend fun installPluginFromAssets(assetsPath: String, forceOverwrite: Boolean = true): Boolean {
-        Log.d(TAG, "installPluginFromAssets: $assetsPath")
         return try {
             val context = requireContext().application
             val pluginFile = File(context.cacheDir, "temp_plugin.xipk")
@@ -230,9 +229,7 @@ object PluginManager {
             }
             val result = installerManager.installPlugin(pluginFile, forceOverwrite, source = PluginSource.ASSET)
             pluginFile.delete()
-            val success = result is com.kingzcheung.xime.plugin.core.runtime.installer.InstallerManager.InstallResult.Success
-            Log.d(TAG, "installPluginFromAssets result: $success")
-            success
+            result is com.kingzcheung.xime.plugin.core.runtime.installer.InstallerManager.InstallResult.Success
         } catch (e: Exception) {
             Log.e(TAG, "installPluginFromAssets failed", e)
             false
@@ -251,10 +248,9 @@ object PluginManager {
             for (fileName in assetFiles) {
                 if (fileName.endsWith(".xipk")) {
                     val assetPath = "$assetsDir/$fileName"
-                    Log.d(TAG, "Installing: $assetPath")
                     if (installPluginFromAssets(assetPath, forceOverwrite = true)) {
                         installedCount++
-                        Log.d(TAG, "Successfully installed: $fileName")
+                        Log.d(TAG, "Installed: $fileName")
                     } else {
                         Log.w(TAG, "Failed to install: $fileName")
                     }
