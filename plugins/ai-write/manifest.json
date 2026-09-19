@@ -8,7 +8,7 @@
   // 插件名称与描述
   "name": "AI 帮写",
   "icon": "帮",
-  "description": "输入草稿/指令，SSE 流式生成长文本，打字机效果上屏。支持任意 OpenAI 兼容接口。",
+  "description": "输入草稿/指令，SSE 流式生成长文本，支持任意 OpenAI 兼容接口。",
 
   // 插件版本
   "version": "1.0.0",

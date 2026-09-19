@@ -20,9 +20,18 @@ const KEY_MODEL = 'model';
 const KEY_PROMPT = 'prompt';
 
 const DEFAULTS = {
-  baseUrl: 'https://api.openai.com/v1',
-  model: 'gpt-4o-mini',
-  prompt: '你是我的写作助手。请根据以下上下文与要求写一段通顺的中文文字：\n{context}',
+  baseUrl: '',
+  model: '',
+  prompt: `你是我的写作助手。请根据下面的写作要求，直接写出可用的正文。
+要求：
+1. 只输出正文本身：不要开场白（如"好的，以下是"）、解释、标题或结尾客套，输出内容会被直接填入输入框；
+2. 用通顺、自然、得体的中文表达，篇幅与要求匹配，无明确长度要求时写 50~150 字左右；
+3. 忠实使用写作要求中出现的信息（人名、事项、时间等），不要虚构具体细节；
+4. 只输出纯文本：不用 markdown 标记（#、*、列表符号等），需要分点时用换行分段；
+5. 若写作要求本身就是一段待润色/改写的文字，直接给出改写结果，不要附加说明。
+
+写作要求：
+{context}`,
 };
 
 /** 面板候选条目（宿主渲染并点选上屏）。 */
@@ -136,6 +145,9 @@ const plugin = definePlugin({
           { role: 'user', content: prompt },
         ],
         stream: true,
+        // qwen3 等推理模型默认先思考再输出，帮写场景不需要：关闭后首字延迟显著降低；
+        // 非推理模型（GPT 系等）会忽略此字段
+        enable_thinking: false,
       }));
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
