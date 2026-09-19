@@ -1,12 +1,15 @@
 // 真机开发支持（xipm dev / xipm logs）。
 //
-// dev：watch 插件源码 → 编译 + 打包 xipk → adb push 到应用外部私有目录 →
-//      广播触发 debug 宿主热安装/重载 → 同时跟随 logcat（插件日志与错误回显）。
+// dev：watch 插件源码 → 编译 + 打包 xipk → adb 推送 → 热安装/重载 → 跟随日志。
+//      双通道（自动探测）：
+//        debug 包（run-as 可用）  = 管道写入应用内部目录 + jsonl 落盘回执 + 错误落盘跟随
+//        release 包（run-as 不可用）= 推 /data/local/tmp + logcat(XipmDev) 回执解析；
+//          需宿主在 设置→关于 连点设备信息 7 次解锁并开启"插件开发模式"
 // logs：实时跟随插件日志（logcat: JsPlugin / PluginErrorLog tag）；
-//       --history 拉取宿主错误落盘文件 errors.jsonl（run-as，debug 包）。
+//       --history 拉取宿主错误落盘文件 errors.jsonl（run-as，仅 debug 包）。
 //
 // 依赖：adb（PATH / ANDROID_HOME / ANDROID_SDK_ROOT / --adb），USB 或无线调试均可。
-// 宿主侧要求：debug 构建包含 DebugPluginInstallReceiver（app/src/debug）。
+// 宿主侧要求：DevPluginInstallActivity（app/src/main，exported=false，开发模式开关门禁）。
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -18,12 +21,25 @@ use anyhow::{Context, Result};
 use crate::engine_js as color;
 use crate::manifest::Manifest;
 
-/// 应用外部私有目录下的热更新暂存目录（无需任何存储权限）。
+/// debug 通道：应用内部私有目录下的热更新暂存目录（run-as 写入）。
 const DEV_DIR: &str = "xipm-dev";
 
-/// 热安装组件（app/src/debug 的 DebugPluginInstallActivity：透明无界面、
-/// `am start` 由 shell 特权发起，不受应用后台执行限制）。
-const INSTALL_ACTIVITY_SUFFIX: &str = "plugin.DebugPluginInstallActivity";
+/// release 兼容通道：/data/local/tmp 下的暂存目录（shell 可写、应用可读，
+/// 安装完成后由宿主侧删除源文件）。
+const COMPAT_DEV_DIR: &str = "/data/local/tmp/xipm-dev";
+
+/// 热安装组件（app/src/main 的 DevPluginInstallActivity：透明无界面、
+/// `am start` 由 shell 特权发起，不受应用后台执行限制；开发模式开关门禁）。
+const INSTALL_ACTIVITY_SUFFIX: &str = "plugin.DevPluginInstallActivity";
+
+/// dev 推送/回执通道（run_dev 开头按 run-as 可用性自动探测）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DevChannel {
+    /// debug 包：run-as 内部目录 + jsonl 回执 + 错误落盘跟随（原全链路）
+    Debug,
+    /// release 包：/data/local/tmp 推送 + logcat(XipmDev) 回执；无错误落盘跟随
+    ReleaseCompat,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // adb 封装
@@ -138,6 +154,17 @@ impl Adb {
         Ok(format!("/data/user/0/{package}/files/xipm-dev/{name}"))
     }
 
+    /// release 兼容通道推送：/data/local/tmp（shell 可写、应用可读；宿主装后删除）。
+    pub fn push_compat(&self, name: &str, local: &Path) -> Result<String> {
+        self.shell(&["mkdir", "-p", COMPAT_DEV_DIR])?;
+        let remote = format!("{COMPAT_DEV_DIR}/{name}");
+        self.run(&["push", local.to_string_lossy().as_ref(), remote.as_str()])
+            .with_context(|| format!("adb push 到 {remote} 失败"))?;
+        // 应用可读的最低权限；装完宿主侧会删除，缩短其他应用可读窗口
+        self.shell(&["chmod", "644", &remote])?;
+        Ok(remote)
+    }
+
     /// 触发热安装（`am start` 无界面 Activity；path 指向设备上的 xipk）。
     pub fn start_install(&self, package: &str, remote_xipk: &str) -> Result<()> {
         let component = format!("{package}/{package}.{INSTALL_ACTIVITY_SUFFIX}");
@@ -153,8 +180,9 @@ impl Adb {
         ])?;
         if out.contains("Error") || out.contains("does not exist") {
             anyhow::bail!(
-                "设备上的 {package} 不包含插件热安装组件（仅最新 debug 构建包含）。\n\
-                 请先执行：./gradlew installDebug\n（am start: {}）",
+                "设备上的 {package} 不包含插件热安装组件，或开发模式未开启。\n\
+                 release 包：设置 → 关于 → 连点设备信息 7 次解锁 → 开启\"插件开发模式\"；\n\
+                 debug 包：请先执行：./gradlew installDebug\n（am start: {}）",
                 out.trim()
             );
         }
@@ -280,7 +308,21 @@ pub async fn run_dev(args: DevArgs) -> Result<()> {
     let adb = Adb::detect(args.adb.clone())?.with_serial(args.device.clone());
     adb.ensure_device()?;
 
-    adb.shell(&["run-as", &args.package, "mkdir", "-p", &format!("files/{DEV_DIR}")])?;
+    // 通道探测：run-as 仅对 debuggable 包有效；release 包自动走兼容通道
+    let channel = if adb.run_as(&args.package, &["true"]).is_ok() {
+        DevChannel::Debug
+    } else {
+        DevChannel::ReleaseCompat
+    };
+    match channel {
+        DevChannel::Debug => {
+            adb.shell(&["run-as", &args.package, "mkdir", "-p", &format!("files/{DEV_DIR}")])?;
+        }
+        DevChannel::ReleaseCompat => {
+            println!("  release 通道：run-as 不可用，改走 /data/local/tmp + logcat 回执");
+            println!("  若安装失败：宿主 设置 → 关于 → 连点设备信息 7 次解锁 → 开启\"插件开发模式\"");
+        }
+    }
     let plugin_name = dir
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -288,10 +330,20 @@ pub async fn run_dev(args: DevArgs) -> Result<()> {
 
     println!("▶ 插件热更新：{} ({})", manifest.id, manifest.version);
 
-    deploy(&dir, &args.out, &adb, &args.package, &plugin_name).await?;
+    deploy(&dir, &args.out, &adb, &args.package, &plugin_name, channel).await?;
 
-    // 插件错误实时跟随（errors.jsonl 增量轮询：不依赖 ROM 限流的 logcat）
-    let error_follower = spawn_error_follower(adb.clone(), args.package.clone(), manifest.id.clone());
+    // 插件错误实时跟随（errors.jsonl 增量轮询：不依赖 ROM 限流的 logcat；
+    // 仅 debug 通道——release 无 run-as 读不了落盘文件）
+    let error_follower = if channel == DevChannel::Debug {
+        Some(spawn_error_follower(
+            adb.clone(),
+            args.package.clone(),
+            manifest.id.clone(),
+        ))
+    } else {
+        println!("  release 通道：无错误落盘跟随，仅 logcat 实时日志（--history 亦不可用）");
+        None
+    };
     let mut logcat = if args.no_logs {
         None
     } else {
@@ -313,7 +365,7 @@ pub async fn run_dev(args: DevArgs) -> Result<()> {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     last = fingerprint(&dir);
                     let started = Instant::now();
-                    match deploy(&dir, &args.out, &adb, &args.package, &plugin_name).await {
+                    match deploy(&dir, &args.out, &adb, &args.package, &plugin_name, channel).await {
                         Ok(()) => println!("↻ 热更新完成（{:.0}ms）", started.elapsed().as_millis()),
                         Err(e) => eprintln!("{} 热更新失败: {e:#}", color::red("✗")),
                     }
@@ -324,28 +376,45 @@ pub async fn run_dev(args: DevArgs) -> Result<()> {
     if let Some(child) = &mut logcat {
         let _ = child.kill();
     }
-    error_follower.stop();
+    if let Some(follower) = error_follower {
+        follower.stop();
+    }
     Ok(())
 }
 
-/// 编译 → 打包 → 管道写入设备内部目录 → 广播安装 → 等待落盘回执。
-/// （dev 用未压缩产物，便于真机排查；内部目录通道避免 /sdcard 访问限制）
-async fn deploy(dir: &Path, out_root: &Path, adb: &Adb, package: &str, plugin_name: &str) -> Result<()> {
+/// 编译 → 打包 → 按通道推送 → am start 热安装 → 等待回执（debug=jsonl / release=logcat）。
+/// （dev 用未压缩产物，便于真机排查）
+async fn deploy(
+    dir: &Path,
+    out_root: &Path,
+    adb: &Adb,
+    package: &str,
+    plugin_name: &str,
+    channel: DevChannel,
+) -> Result<()> {
     let outcome = crate::build::build_plugin(dir, out_root, false).await?;
     let xipk = crate::pack::pack_plugin(
         &outcome.out_dir,
         &outcome.manifest,
         &out_root.join("dist"),
     )?;
-    let before = fetch_results(adb, package).map(|v| v.len()).unwrap_or(0);
-    let remote_path = adb.push_to_internal(package, &format!("{plugin_name}.xipk"), &xipk)?;
+    let fetch = |adb: &Adb, package: &str| match channel {
+        DevChannel::Debug => fetch_results(adb, package),
+        DevChannel::ReleaseCompat => fetch_results_compat(adb),
+    };
+    let before = fetch(adb, package).map(|v| v.len()).unwrap_or(0);
+    let remote_path = match channel {
+        DevChannel::Debug => adb.push_to_internal(package, &format!("{plugin_name}.xipk"), &xipk)?,
+        DevChannel::ReleaseCompat => adb.push_compat(&format!("{plugin_name}.xipk"), &xipk)?,
+    };
     adb.start_install(package, &remote_path)?;
 
-    // 等待设备落盘回执（不依赖 logcat：部分 ROM 限流后台日志）
+    // 等待设备回执（debug：jsonl 落盘；release：logcat XipmDev dump——
+    // 部分 ROM 限流后台持续日志，但前台 dump 拿得到安装打点）
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         tokio::time::sleep(Duration::from_millis(400)).await;
-        if let Ok(results) = fetch_results(adb, package) {
+        if let Ok(results) = fetch(adb, package) {
             if results.len() > before {
                 if let Some(done) = results
                     .iter()
@@ -368,12 +437,21 @@ async fn deploy(dir: &Path, out_root: &Path, adb: &Adb, package: &str, plugin_na
             }
         }
         if Instant::now() >= deadline {
-            println!(
-                "  {} 未收到设备回执（10s）：请确认宿主为最新 debug 包（./gradlew installDebug），\
-                 或用 `xipm logs {}` 查看设备日志",
-                color::yellow("!"),
-                dir.display()
-            );
+            if channel == DevChannel::ReleaseCompat {
+                println!(
+                    "  {} 未收到设备回执（10s）：请确认已开启\"插件开发模式\"\
+                     （设置 → 关于 → 连点设备信息 7 次解锁），或用 `xipm logs {}` 查看设备日志",
+                    color::yellow("!"),
+                    dir.display()
+                );
+            } else {
+                println!(
+                    "  {} 未收到设备回执（10s）：请确认宿主为最新 debug 包（./gradlew installDebug），\
+                     或用 `xipm logs {}` 查看设备日志",
+                    color::yellow("!"),
+                    dir.display()
+                );
+            }
             return Ok(());
         }
     }
@@ -396,6 +474,38 @@ fn fetch_results(adb: &Adb, package: &str) -> Result<Vec<DevResult>> {
         .run_as(package, &["cat", "files/logs/xipm-dev-result.jsonl"])
         .unwrap_or_default();
     Ok(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+}
+
+/// release 兼容通道回执：解析 `logcat -d -s XipmDev` 的 INSTALL_OK / INSTALL_FAIL 行
+/// （DevPluginInstaller 的 logcat 打点，格式与 jsonl 字段一一对应）。
+fn fetch_results_compat(adb: &Adb) -> Result<Vec<DevResult>> {
+    let text = adb
+        .run(&["logcat", "-d", "-v", "time", "-s", "XipmDev"])
+        .unwrap_or_default();
+    let mut results = Vec::new();
+    for line in text.lines() {
+        if let Some(pos) = line.find("INSTALL_OK ") {
+            let rest = &line[pos + "INSTALL_OK ".len()..];
+            let mut parts = rest.splitn(2, ' ');
+            let id = parts.next().map(|s| s.to_string());
+            let m = parts.next().unwrap_or("").to_string();
+            results.push(DevResult {
+                stage: "done".into(),
+                ok: Some(true),
+                p: id,
+                m,
+            });
+        } else if let Some(pos) = line.find("INSTALL_FAIL ") {
+            let m = line[pos + "INSTALL_FAIL ".len()..].to_string();
+            results.push(DevResult {
+                stage: "done".into(),
+                ok: Some(false),
+                p: None,
+                m,
+            });
+        }
+    }
+    Ok(results)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -424,6 +534,11 @@ pub async fn run_logs(args: LogsArgs) -> Result<()> {
     adb.ensure_device()?;
 
     if args.history {
+        if adb.run_as(&args.package, &["true"]).is_err() {
+            anyhow::bail!(
+                "--history 需要 debug 包（run-as 不可用）；release 包请使用实时日志（默认模式）"
+            );
+        }
         let bytes = adb.exec_out(&[
             "run-as",
             &args.package,

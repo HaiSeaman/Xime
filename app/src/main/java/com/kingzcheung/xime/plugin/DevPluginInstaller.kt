@@ -9,18 +9,21 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 插件热安装公共逻辑（`xipm dev` 调试用，仅 debug source set）。
- *
- * 由 [DebugPluginInstallActivity]（主通道：`am start`，不受后台广播限制）与
- * [DebugPluginInstallReceiver]（兼容通道：前台时广播）共同调用。
+ * 插件热安装公共逻辑（`xipm dev` 调试用，debug/release 通用，开关门禁见
+ * [DevPluginInstallActivity]）。
  *
  * 结果双通道：
- * - logcat：`INSTALL_OK ...` / `INSTALL_FAIL ...`（tag=XipmDev）
- * - 落盘：`files/logs/xipm-dev-result.jsonl`（stage=received/done，供 CLI run-as 读取）
+ * - logcat：`INSTALL_OK ...` / `INSTALL_FAIL ...`（tag=XipmDev；release 通道 CLI
+ *   经 `logcat -s XipmDev` 轮询解析）
+ * - 落盘：`files/logs/xipm-dev-result.jsonl`（stage=received/done，debug 通道 CLI
+ *   经 run-as 读取）
  */
-object DebugPluginInstaller {
+object DevPluginInstaller {
 
     private const val TAG = "XipmDev"
+
+    /** release 兼容通道的暂存目录前缀（shell 0644，任何应用可读，装完即删）。 */
+    private const val COMPAT_DIR = "/data/local/tmp/"
 
     /** 覆盖安装并重载；返回是否成功。 */
     suspend fun install(context: Context, path: String?): Boolean {
@@ -30,15 +33,14 @@ object DebugPluginInstaller {
             appendResult(context, "done", false, null, "缺少安装路径")
             return false
         }
-        return try {
+        val ok = try {
             PluginManager.awaitInitialization()
             val file = File(path)
             if (!file.isFile) {
                 Log.e(TAG, "INSTALL_FAIL 文件不存在或不可读: $path")
                 appendResult(context, "done", false, null, "文件不存在或不可读: $path")
-                return false
-            }
-            when (
+                false
+            } else when (
                 val result = PluginManager.installerManager.installPlugin(
                     file,
                     forceOverwrite = true,
@@ -67,9 +69,18 @@ object DebugPluginInstaller {
             appendResult(context, "done", false, null, "安装异常: ${e.message}")
             false
         }
+        deleteCompatSource(path)
+        return ok
     }
 
-    /** 回执落盘（CLI 经 run-as 读取；失败不影响主流程）。 */
+    /** release 兼容通道：清理 /data/local/tmp 暂存副本（无论成败）。 */
+    private fun deleteCompatSource(path: String) {
+        if (path.startsWith(COMPAT_DIR)) {
+            runCatching { File(path).delete() }
+        }
+    }
+
+    /** 回执落盘（debug 通道 CLI 经 run-as 读取；失败不影响主流程）。 */
     fun appendResult(
         context: Context,
         stage: String,

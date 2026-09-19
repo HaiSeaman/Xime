@@ -16,6 +16,7 @@ object SettingsPreferences {
     private const val KEY_SETUP_COMPLETED = "setup_completed"
     private const val KEY_DARK_MODE = "dark_mode"
     private const val KEY_VERBOSE_LOGGING = "verbose_logging"
+    private const val KEY_PLUGIN_DEV_MODE = "plugin_dev_mode"
     
     private const val KEY_SOUND_ENABLED = "sound_enabled"
     private const val KEY_SOUND_VOLUME = "sound_volume"
@@ -223,6 +224,21 @@ object SettingsPreferences {
 
     fun setVerboseLoggingEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_VERBOSE_LOGGING, enabled).apply()
+    }
+
+    /**
+     * 插件开发模式：开启后允许 adb 通道热安装插件（xipm dev，仅约束 release 包；
+     * debug 包 debuggable 本就全量开放，门禁直接放行）。入口隐藏（设置 → 关于 →
+     * 连点设备信息 7 次解锁），默认关闭；关闭时热安装 Activity 秒退，adb 无法注入
+     * 插件代码。状态持久化（区别于解锁 flag），否则每次冷启动都要重敲一遍才能用
+     * xipm dev。
+     */
+    fun isPluginDevModeEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_PLUGIN_DEV_MODE, false)
+    }
+
+    fun setPluginDevModeEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_PLUGIN_DEV_MODE, enabled).apply()
     }
 
     fun isSetupCompleted(context: Context): Boolean {

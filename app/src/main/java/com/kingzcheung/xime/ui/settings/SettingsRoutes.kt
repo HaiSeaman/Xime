@@ -19,6 +19,7 @@ object SettingsRoutes {
     const val SmartPrediction = "smart_prediction"
     const val SpeechToText = "speech_to_text"
     const val About = "about"
+    const val Developer = "developer"
     const val StorageSpace = "storage_space"
     const val Privacy = "privacy"
     const val Licenses = "licenses"

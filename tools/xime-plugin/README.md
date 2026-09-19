@@ -155,8 +155,13 @@ test('未 stub 的网络请求被拒绝', async () => {
 
 ### `xipm dev [DIR]`
 
-真机热调试循环：watch 插件源码 → 编译 + 打包 → `adb push` → 广播触发宿主
-**覆盖安装 + 重载**（debug 宿主）→ 同时跟随设备日志。
+真机热调试循环：watch 插件源码 → 编译 + 打包 → `adb` 推送 → 触发宿主
+**覆盖安装 + 重载** → 同时跟随设备日志。推送/回执通道按宿主类型自动探测：
+
+| 通道 | 判定 | 推送 | 回执 | 错误落盘跟随 |
+|---|---|---|---|---|
+| debug（默认） | `run-as` 可用 | `run-as` 管道写入内部 `files/xipm-dev/` | jsonl 落盘（不依赖 logcat） | ✓ |
+| release | `run-as` 不可用 | `adb push` 到 `/data/local/tmp/xipm-dev/`（装后宿主删除） | logcat dump 解析 `XipmDev` | ✗ |
 
 ```bash
 xipm dev plugins/my-plugin
@@ -166,24 +171,25 @@ xipm dev --device <serial> --no-logs          # 多设备/无线调试；只热�
 | 参数 | 说明 | 默认 |
 |---|---|---|
 | `--package` | 应用包名 | `com.kingzcheung.xime` |
-| `--adb` | adb 路径（缺省 `$ADB` / `$ANDROID_HOME/platform-tools/adb` / PATH） | - |
+| `--adb` | adb 路径（缺省 `$ADB` / `$ANDROID_HOME/platform-tools/adb`（Windows 自动补 `.exe`）/ PATH） | - |
 | `--device` | `adb -s` 设备序列号（无线调试：先 `adb pair`/`connect`） | - |
 | `--no-logs` | 不跟随设备日志 | 跟随 |
 | `--out` | 构建产物根目录（xipk 暂存 `<out>/dist`） | `build/plugin-dev` |
 
-- **宿主要求**：**最新** debug 构建（热安装组件仅在 debug source set；`./gradlew installDebug`）
-- **触发方式**：`am start` 拉起宿主内无界面 Activity（透明主题、完成后立即结束）——
-  相比广播不受 Android 后台执行限制（后台应用收自定义广播会被系统丢弃：
-  "Background execution not allowed"），宿主未使用键盘时也能可靠热更新
-- **不会被内置覆盖**：宿主 debug 启动会同步内置 assets 插件，但采用"仅内置版本更高才覆盖"
+- **宿主要求**：热安装组件 `DevPluginInstallActivity` 在 debug/release 构建**均包含**，
+  但受"插件开发模式"开关门禁——**release 包**需在宿主 `设置 → 关于 → 连点设备信息
+  7 次（1.5s 内）` 解锁并开启该开关；开关关闭时热安装入口秒退，adb 无法注入插件
+- **触发方式**：`am start` 拉起宿主内无界面 Activity（透明主题、完成后立即结束、
+  `exported=false`——shell 特权可拉起，普通应用不可触达）——相比广播不受 Android
+  后台执行限制（后台应用收自定义广播会被系统丢弃："Background execution not
+  allowed"），宿主未使用键盘时也能可靠热更新
+- **不会被内置覆盖**：宿主启动会同步内置 assets 插件，但采用"仅内置版本更高才覆盖"
   （版本守卫）——开发中的热更新版本不会被回滚；内置发版 bump 版本后仍会升级
-- **文件通道**：xipk 经 `adb shell -T` 管道写入宿主**内部私有目录**
-  `files/xipm-dev/`（绕开部分 ROM 对 `/sdcard/Android/data` 的访问限制），
-  广播/启动参数传入 `/data/user/0/<package>/files/xipm-dev/<name>.xipk`
-- **流程回执**：安装/重载结果双通道——
-  1. CLI 经 `run-as` 读取 `files/logs/xipm-dev-result.jsonl`（默认，不依赖 logcat，显示
-     `✓ 热安装成功` / `✗ 热安装失败：<原因>`；10s 无回执提示 installDebug）
-  2. logcat `INSTALL_OK` / `INSTALL_FAIL`（tag=`XipmDev`，dev 日志跟随中可见）
+- **流程回执**：安装/重载结果——
+  1. debug 通道：CLI 经 `run-as` 读取 `files/logs/xipm-dev-result.jsonl`（默认，不依赖
+     logcat，显示 `✓ 热安装成功` / `✗ 热安装失败：<原因>`；10s 无回执提示检查宿主）
+  2. release 通道：CLI 轮询 `logcat -d -s XipmDev` 解析 `INSTALL_OK` / `INSTALL_FAIL`；
+     错误落盘跟随与 `xipm logs --history` 在此通道不可用
 
 ### `xipm logs [DIR]`
 
@@ -203,7 +209,7 @@ xipm logs plugins/my-plugin --history --lines 100 --json
   3. logcat 跟随（宿主行为日志：加载/热更新/事件等含插件 id 的行）
 - **历史**：`adb exec-out run-as <package> cat files/logs/plugins/errors.jsonl`
   解析展示（时间/分类/操作/消息/堆栈），`--json` 输出 JSON 行供 IDE/脚本集成
-- **注意**：`--history` 需要 debug 包（`run-as` 限制）与设备在线
+- **注意**：`--history` 需要 debug 包（`run-as` 限制）；release 包请使用实时日志
 
 ### `xipm init <NAME>`
 
