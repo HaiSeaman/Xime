@@ -1,15 +1,15 @@
 // =============================================
-// 快捷发送示例插件元数据（宿主用宽松 JSON 解析：支持 // 注释与尾逗号）
+// 常用语插件元数据（宿主用宽松 JSON 解析：支持 // 注释与尾逗号）
 //
-// 演示 capabilities.candidate_transform 候选词变换 + capabilities.quick_send_read
-// 宿主数据 API）
+// 能力：capabilities.candidate_transform 候选词变换 + capabilities.quick_send_read
+// （读取宿主快捷发送数据）
 // =============================================
 {
-  "id": "com.kingzcheung.xime.plugin.quick_send_demo",
+  "id": "com.kingzcheung.xime.plugin.quick_phrase",
 
-  "name": "快捷发送",
-  "icon": "快",
-  "description": "输入触发编码时把快捷发送内容（Room 数据，含 code）匹配进候选栏：内容命中（text 以候选词开头）跟随该候选，编码命中（输入为 code 前缀）放第二候选位。数据经 host.quickSend.list() 读取，变更经 quick_send_changed 事件刷新缓存。",
+  "name": "常用语",
+  "icon": "语",
+  "description": "把常用语联想进候选栏：读取宿主快捷发送库（设置里的快捷短语，含触发编码），输入时内容命中（条目以候选词开头）跟随该候选，编码命中（输入为 code 前缀）放第二候选位，点选即上屏。数据经 host.quickSend.list() 读取，变更经 quick_send_changed 事件刷新。",
 
   "version": "1.0.0",
 

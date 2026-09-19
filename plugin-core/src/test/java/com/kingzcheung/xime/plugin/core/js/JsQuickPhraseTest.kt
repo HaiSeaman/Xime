@@ -9,7 +9,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * 验证 quick-send-demo JS 版：宿主快捷发送数据（host.quickSend）匹配进候选栏。
+ * 验证常用语插件（quick-phrase）：宿主快捷发送数据（host.quickSend）匹配进候选栏。
  *
  * 覆盖：
  * - onLoad 拉取 host.quickSend.list() 缓存 → transformCandidates 内容命中跟随引擎候选并注入 comment
@@ -19,7 +19,7 @@ import java.io.File
  *
  * 载入真实插件产物（xipm build 输出），测试与发布同源。
  */
-class JsQuickSendDemoTest {
+class JsQuickPhraseTest {
 
     @get:Rule
     val tmp = TemporaryFolder()
@@ -40,19 +40,19 @@ class JsQuickSendDemoTest {
     private fun pluginSourceFile(): File {
         var dir: File? = File(System.getProperty("user.dir") ?: ".")
         while (dir != null) {
-            val candidate = File(dir, "build/plugin-js/quick-send-demo/main.js")
+            val candidate = File(dir, "build/plugin-js/quick-phrase/main.js")
             if (candidate.isFile) return candidate
             dir = dir.parentFile
         }
         throw AssertionError(
-            "找不到 build/plugin-js/quick-send-demo/main.js，" +
-                "请先运行：cd tools/xime-plugin && cargo run -- build ../../plugins/quick-send-demo --out ../../build/plugin-js"
+            "找不到 build/plugin-js/quick-phrase/main.js，" +
+                "请先运行：cd tools/xime-plugin && cargo run -- build ../../plugins/quick-phrase --out ../../build/plugin-js"
         )
     }
 
     private fun newRuntime(api: QuickSendHostApi): JsScriptRuntime {
         val runtime = JsScriptRuntime(
-            "js-quick-send-demo",
+            "js-quick-phrase",
             writePlugin(),
             "main.js",
             NoopPluginConfigStore,
