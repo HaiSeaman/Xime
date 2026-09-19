@@ -15,7 +15,7 @@
   "activation": "multi",
   // 入口脚本（xime-plugin 编译产物）
   "entry": "main.js",
-  // 目标平台（缺省视为 ["android"]；可选 android/ios/windows/macos/linux/web）
+  // 目标平台（缺省视为 ["android"]；可选 android/ios/windows/macos/linux）
   "platforms": [
     "android"
   ],

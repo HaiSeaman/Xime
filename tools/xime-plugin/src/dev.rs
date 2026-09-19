@@ -38,15 +38,18 @@ pub struct Adb {
 impl Adb {
     /// 定位 adb：--adb > $ADB > $ANDROID_HOME/platform-tools > $ANDROID_SDK_ROOT/... > PATH
     pub fn detect(explicit: Option<PathBuf>) -> Result<Self> {
+        // Windows 上 SDK 目录里的可执行文件带 .exe 后缀；Command::new 对含路径分隔符的
+        // 程序名不自动补后缀，缺这个会误报"adb 不可用"（PATH 兜底的裸 "adb" 无此问题）
+        let bin = if cfg!(windows) { "adb.exe" } else { "adb" };
         let exe = explicit
             .or_else(|| std::env::var_os("ADB").map(PathBuf::from))
             .or_else(|| {
                 std::env::var_os("ANDROID_HOME")
-                    .map(|h| PathBuf::from(h).join("platform-tools").join("adb"))
+                    .map(|h| PathBuf::from(h).join("platform-tools").join(bin))
             })
             .or_else(|| {
                 std::env::var_os("ANDROID_SDK_ROOT")
-                    .map(|h| PathBuf::from(h).join("platform-tools").join("adb"))
+                    .map(|h| PathBuf::from(h).join("platform-tools").join(bin))
             })
             .unwrap_or_else(|| PathBuf::from("adb"));
         let adb = Self { exe, serial: None };

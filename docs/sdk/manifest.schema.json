@@ -42,7 +42,7 @@
     },
     "platforms": {
       "type": "array",
-      "description": "目标平台声明（缺省视为 [\"android\"]；宿主按平台门禁加载）。已知标识：android/ios/windows/macos/linux/web，未知标识仅提示不拒绝",
+      "description": "目标平台声明（缺省视为 [\"android\"]；宿主按平台门禁加载）。已知标识：android/ios/windows/macos/linux，未知标识仅提示不拒绝",
       "items": { "type": "string", "minLength": 1 },
       "minItems": 1,
       "uniqueItems": true

@@ -245,7 +245,7 @@ plugins/my-plugin/
   "version": "0.1.0",
   "type": "tool",                   // tool / emoji / speech / clipboard_sync / backup
   "entry": "main.js",               // 固定 main.js（编译产物）
-  "platforms": ["android"],         // 目标平台（缺省视为 ["android"]；已知 android/ios/windows/macos/linux/web）
+  "platforms": ["android"],         // 目标平台（缺省视为 ["android"]；已知 android/ios/windows/macos/linux）
   "minHostVersion": "2.8.0",
   // "network": { "hosts": ["api.example.com"], "allowCustomHosts": false },
   // "capabilities": { "tool": { "display": "passive" } }

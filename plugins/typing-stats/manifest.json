@@ -17,7 +17,7 @@
 
   "entry": "main.js",
 
-  // 目标平台（缺省视为 ["android"]；可选 android/ios/windows/macos/linux/web）
+  // 目标平台（缺省视为 ["android"]；可选 android/ios/windows/macos/linux）
   "platforms": ["android"],
 
   "minHostVersion": "3.0.0",

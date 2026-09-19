@@ -38,7 +38,7 @@ pub struct Manifest {
 }
 
 /// 已知平台标识（未知值仅告警不报错，为未来平台留向前兼容）。
-pub const KNOWN_PLATFORMS: [&str; 6] = ["android", "ios", "windows", "macos", "linux"];
+pub const KNOWN_PLATFORMS: [&str; 5] = ["android", "ios", "windows", "macos", "linux"];
 
 /// 缺省平台：platforms 缺省/为空时视为仅 android（存量插件零改动即可通过校验）。
 pub const DEFAULT_PLATFORM: &str = "android";
