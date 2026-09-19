@@ -328,6 +328,15 @@ async fn run_check(args: CheckArgs) -> anyhow::Result<()> {
                     println!("  ⚠ {w}");
                 }
                 failed += cap_errors.len();
+                // 平台声明校验：空数组按失败计，未知标识/重复项仅提示
+                let (plat_errors, plat_warnings) = manifest.validate_platforms();
+                for e in &plat_errors {
+                    eprintln!("  ✗ {e}");
+                }
+                for w in &plat_warnings {
+                    println!("  ⚠ {w}");
+                }
+                failed += plat_errors.len();
 
                 // 扩展点一致性校验（需编译产物；缺失则跳过并提示，先运行 xipm build）
                 match find_built_main_js(&dir, &args.out) {

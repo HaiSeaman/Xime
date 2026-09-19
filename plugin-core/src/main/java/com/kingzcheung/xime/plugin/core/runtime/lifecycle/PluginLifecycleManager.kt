@@ -71,6 +71,10 @@ class PluginLifecycleManager(
         val hostVersion = com.kingzcheung.xime.plugin.core.util.VersionUtil.getHostVersionName(application)
         val enabledPlugins = allPlugins.filter { plugin ->
             if (!plugin.enabled || loadedPlugins.containsKey(plugin.id)) return@filter false
+            if (!plugin.supportsPlatform(PluginInfo.PLATFORM_ANDROID)) {
+                Log.w(TAG, "Plugin ${plugin.id} 目标平台为 ${plugin.platforms}，非当前平台，跳过加载")
+                return@filter false
+            }
             val compatible = com.kingzcheung.xime.plugin.core.util.VersionUtil.isHostSupported(
                 hostVersion ?: "", plugin.minHostVersion, plugin.maxHostVersion
             )
@@ -107,6 +111,10 @@ class PluginLifecycleManager(
             )
         ) {
             Log.w(TAG, "Plugin $pluginId 不兼容当前主应用版本，拒绝加载")
+            return false
+        }
+        if (!pluginInfo.supportsPlatform(PluginInfo.PLATFORM_ANDROID)) {
+            Log.w(TAG, "Plugin $pluginId 目标平台为 ${pluginInfo.platforms}，拒绝加载")
             return false
         }
 

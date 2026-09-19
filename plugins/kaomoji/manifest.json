@@ -29,6 +29,9 @@
   // 入口脚本（TS 编译产物，相对插件包根目录）
   "entry": "main.js",
 
+  // 目标平台（缺省视为 ["android"]；可选 android/ios/windows/macos/linux/web）
+  "platforms": ["android"],
+
   // 宿主最低版本要求（满足则加载，不满足插件中心提示不可用）
   "minHostVersion": "3.0.0",
 

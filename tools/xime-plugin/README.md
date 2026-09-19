@@ -106,7 +106,7 @@ xipm pack <插件目录> --with-assets            # 单插件：打包并拷贝�
 
 ### `xipm check [DIR]`
 
-校验 `manifest.json`（宽松 JSON：支持 `//` 注释与尾逗号）字段与格式：id 命名空间、entry、version、入口源码存在性。
+校验 `manifest.json`（宽松 JSON：支持 `//` 注释与尾逗号）字段与格式：id 命名空间、entry、version、类型 × 能力一致性、平台声明（`platforms` 空数组报错，未知平台标识提示）、入口源码存在性。
 
 ```bash
 xipm check --all --plugins-dir plugins
@@ -245,6 +245,7 @@ plugins/my-plugin/
   "version": "0.1.0",
   "type": "tool",                   // tool / emoji / speech / clipboard_sync / backup
   "entry": "main.js",               // 固定 main.js（编译产物）
+  "platforms": ["android"],         // 目标平台（缺省视为 ["android"]；已知 android/ios/windows/macos/linux/web）
   "minHostVersion": "2.8.0",
   // "network": { "hosts": ["api.example.com"], "allowCustomHosts": false },
   // "capabilities": { "tool": { "display": "passive" } }

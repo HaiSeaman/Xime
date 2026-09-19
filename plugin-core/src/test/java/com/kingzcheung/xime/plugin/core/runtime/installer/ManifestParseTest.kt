@@ -309,6 +309,28 @@ class ManifestParseTest {
     }
 
     @Test
+    fun `平台声明解析并归一化空白项`() {
+        val content = """
+            {
+              "id": "demo",
+              "platforms": ["android", " ios ", ""]
+            }
+        """.trimIndent()
+
+        val config = (InstallerManager.parseManifestContent(content) as PluginParseResult.Success).config
+        assertEquals(listOf("android", "ios"), config.platforms)
+    }
+
+    @Test
+    fun `平台声明缺省或空数组视为 android`() {
+        val absent = (InstallerManager.parseManifestContent("""{ "id": "mini" }""") as PluginParseResult.Success).config
+        assertEquals(listOf("android"), absent.platforms)
+
+        val empty = (InstallerManager.parseManifestContent("""{ "id": "mini", "platforms": [] }""") as PluginParseResult.Success).config
+        assertEquals(listOf("android"), empty.platforms)
+    }
+
+    @Test
     fun `资源路径合法性校验`() {
         assertTrue("普通文件名合法", InstallerManager.isValidResourcePath("icon.png"))
         assertTrue("子目录合法", InstallerManager.isValidResourcePath("icons/ai.png"))

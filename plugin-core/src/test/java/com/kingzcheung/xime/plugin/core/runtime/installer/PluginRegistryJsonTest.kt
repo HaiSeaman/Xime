@@ -149,4 +149,19 @@ class PluginRegistryJsonTest {
         val decoded = decodeRegistryJson(content).single()
         assertEquals(null, decoded.capabilities)
     }
+
+    @Test
+    fun `注册表旧条目无 platforms 时归一化为 android`() {
+        val content = """{ "version": 1, "plugins": [ { "id": "a", "path": "/x/main.js" } ] }"""
+        val decoded = decodeRegistryJson(content).single()
+        assertEquals(listOf(PluginInfo.PLATFORM_ANDROID), decoded.platforms)
+        assertTrue(decoded.supportsPlatform(PluginInfo.PLATFORM_ANDROID))
+    }
+
+    @Test
+    fun `非目标平台插件不通过 android 门禁`() {
+        val info = sampleInfo().copy(platforms = listOf("ios"))
+        assertFalse(info.supportsPlatform(PluginInfo.PLATFORM_ANDROID))
+        assertTrue(info.supportsPlatform("ios"))
+    }
 }

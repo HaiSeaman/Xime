@@ -34,7 +34,9 @@ internal data class PluginConfig(
     val allowCustomHosts: Boolean = false,
     val toolbarButtons: List<PluginToolbarButton> = emptyList(),
     val icon: String? = null,
-    val capabilities: com.kingzcheung.xime.plugin.core.model.PluginCapabilities? = null
+    val capabilities: com.kingzcheung.xime.plugin.core.model.PluginCapabilities? = null,
+    /** 生效的目标平台列表（manifest.platforms 归一化；缺省视为 android）。 */
+    val platforms: List<String> = listOf(com.kingzcheung.xime.plugin.core.model.PluginInfo.PLATFORM_ANDROID)
 )
 
 /** manifest.json 的类型化模型，由 kotlinx-serialization-json 解析（宽松模式）。 */
@@ -52,7 +54,9 @@ internal data class PluginManifest(
     val toolbarButtons: List<ToolbarButtonConfig> = emptyList(),
     /** 顶层 icon：文字（如 "译"）或 resources/ 下图片文件名。 */
     val icon: String? = null,
-    val capabilities: CapabilitiesConfig? = null
+    val capabilities: CapabilitiesConfig? = null,
+    /** 目标平台声明（缺省/为空视为 android，由安装解析归一化）。 */
+    val platforms: List<String> = emptyList()
 )
 
 @Serializable
@@ -263,6 +267,11 @@ class InstallerManager(
                         action = it.action.ifBlank { "open_panel" }
                     )
                 }
+            // 平台声明归一化：空白项过滤后为空视为 android（存量插件零改动）
+            val platforms = manifest.platforms
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .ifEmpty { listOf(com.kingzcheung.xime.plugin.core.model.PluginInfo.PLATFORM_ANDROID) }
 
             PluginParseResult.Success(
                 PluginConfig(
@@ -278,7 +287,8 @@ class InstallerManager(
                     allowCustomHosts = manifest.network?.allowCustomHosts ?: false,
                     toolbarButtons = toolbarButtons,
                     icon = manifest.icon?.takeIf { it.isNotBlank() },
-                    capabilities = capabilities
+                    capabilities = capabilities,
+                    platforms = platforms
                 )
             )
         } catch (e: Exception) {            Log.e("InstallerManager", "parsePluginConfig yaml failed", e)
@@ -403,7 +413,8 @@ class InstallerManager(
                 allowCustomHosts = pluginConfig.allowCustomHosts,
                 toolbarButtons = pluginConfig.toolbarButtons,
                 manifestIcon = pluginConfig.icon,
-                capabilities = pluginConfig.capabilities
+                capabilities = pluginConfig.capabilities,
+                platforms = pluginConfig.platforms
             )
 
             if (existingPlugin != null) {

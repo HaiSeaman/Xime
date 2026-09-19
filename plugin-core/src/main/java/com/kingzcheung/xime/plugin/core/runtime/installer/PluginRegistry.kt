@@ -154,7 +154,9 @@ internal data class RegistryPlugin(
     val allowCustomHosts: Boolean = false,
     val toolbarButtons: List<RegistryToolbarButton> = emptyList(),
     val manifestIcon: String? = null,
-    val capabilities: JsonObject? = null
+    val capabilities: JsonObject? = null,
+    /** 目标平台声明（旧条目缺省为空，读取时归一化为 android）。 */
+    val platforms: List<String> = emptyList()
 )
 
 @Serializable
@@ -186,7 +188,8 @@ internal fun PluginInfo.toRegistryPlugin(): RegistryPlugin = RegistryPlugin(
         RegistryToolbarButton(id = it.id, label = it.label, icon = it.icon, action = it.action)
     },
     manifestIcon = manifestIcon,
-    capabilities = capabilities?.toJson()
+    capabilities = capabilities?.toJson(),
+    platforms = platforms
 )
 
 internal fun RegistryPlugin.toPluginInfo(): PluginInfo {
@@ -213,7 +216,9 @@ internal fun RegistryPlugin.toPluginInfo(): PluginInfo {
             PluginToolbarButton(id = it.id, label = it.label, icon = it.icon, action = it.action)
         },
         manifestIcon = manifestIcon,
-        capabilities = capabilities?.toPluginCapabilities()
+        capabilities = capabilities?.toPluginCapabilities(),
+        // 旧版 plugins.json 条目无 platforms 字段：归一化为 android（与缺省声明一致）
+        platforms = platforms.ifEmpty { listOf(PluginInfo.PLATFORM_ANDROID) }
     )
 }
 

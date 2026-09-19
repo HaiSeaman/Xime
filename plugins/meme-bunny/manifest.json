@@ -22,6 +22,9 @@
   // 入口脚本（TS 编译产物）
   "entry": "main.js",
 
+  // 目标平台（缺省视为 ["android"]；可选 android/ios/windows/macos/linux/web）
+  "platforms": ["android"],
+
   // 宿主最低版本要求（v3 起为 async/await 服务模型）
   "minHostVersion": "3.0.0",
 
