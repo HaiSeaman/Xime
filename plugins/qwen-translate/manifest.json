@@ -3,7 +3,7 @@
 // =============================================
 {
   // 插件唯一标识
-  "id": "com.kingzcheung.xime.plugin.ai_translate",
+  "id": "com.kingzcheung.xime.plugin.qwen_translate",
   // 插件名称与描述
   "name": "千问翻译",
   "icon": "译",
@@ -24,8 +24,8 @@
   // 工具栏入口
   "toolbarButtons": [
     {
-      "id": "com.kingzcheung.xime.plugin.ai_translate:open",
-      "label": "AI 翻译",
+      "id": "com.kingzcheung.xime.plugin.qwen_translate:open",
+      "label": "千问翻译",
       "action": "open_panel"
     }
   ],

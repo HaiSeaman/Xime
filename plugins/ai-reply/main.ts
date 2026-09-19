@@ -19,9 +19,18 @@ const KEY_MODEL = 'model';
 const KEY_PROMPT = 'prompt';
 
 const DEFAULTS = {
-  baseUrl: 'https://api.openai.com/v1',
-  model: 'gpt-4o-mini',
-  prompt: '你是我的智能回复助手。请根据对方消息生成 3~5 条简洁、自然、符合我语气的中文回复候选，每条不超过 30 字。严格按以下格式输出：只输出一个 JSON 对象，格式为 {"candidates": ["好的呀", "马上来", "稍等片刻"]}，candidates 是候选文本数组，不要编号、不要解释、不要任何其他文字。对方消息：{context}',
+  baseUrl: '',
+  model: '',
+  prompt: `你是我的聊天回复助手。请根据对方消息，以我的身份生成回复候选，供我点选后直接发送。
+要求：
+1. 生成 3~5 条候选，每条不超过 30 字，口语自然、简洁礼貌，符合日常聊天习惯；
+2. 候选之间意图要有区分（如同意、婉拒、追问等），覆盖最可能的选择，不要同义反复；
+3. 对方提问时至少一条直接回答；对方提出请求时明确表达同意或拒绝，不要含糊敷衍；
+4. 默认用中文回复；对方消息明显是其他语言时，改用该语言回复；
+5. 严格只输出一个 JSON 对象：不要 markdown 代码块、不要编号、不要任何解释或多余文字，格式为 {"candidates": ["好的呀", "马上来", "稍等片刻"]}，candidates 为候选文本数组。
+
+对方消息：
+{context}`,
 };
 
 /** 面板候选条目（宿主渲染并点选上屏）。 */
@@ -222,6 +231,9 @@ const plugin = definePlugin({
           { role: 'user', content: prompt },
         ],
         temperature: 0.8,
+        // qwen3 等推理模型默认先思考再回答，候选回复场景不需要：关闭后出首字/总耗时显著降低；
+        // 非推理模型（GPT 系等）会忽略此字段
+        enable_thinking: false,
       }));
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
