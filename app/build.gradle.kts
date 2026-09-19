@@ -49,7 +49,7 @@ android {
         applicationId = "com.kingzcheung.xime"
         minSdk = 28
         targetSdk = 35
-        versionCode = 20260917
+        versionCode = 20260920
         versionName = "3.0.0-beta1"
 
 

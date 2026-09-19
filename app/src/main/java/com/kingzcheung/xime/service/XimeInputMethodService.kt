@@ -359,6 +359,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
     /** 语音会话真正完成（最终结果已提交/超时兜底/出错）后恢复键盘状态。幂等。 */
     internal fun restoreAfterVoiceFinish() {
+        // 兜底：会话结束的任何路径都确保录音已请求停止（幂等，正常松手路径
+        // recordingThread 已置空时直接返回）。UI 状态一旦清零，松手停止链就失效，
+        // 这里漏一次 stop 麦克风/引擎连接就会一直后台占用。
+        voiceRecognitionHandler.stopRecognition()
         keyboardViewModel.exitVoice()
         isTrackingVoiceButtons = false
         voiceRecordingStarted = false

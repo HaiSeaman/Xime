@@ -153,6 +153,10 @@ fun CandidateBar(
         rowPaddingPx + maxOf(moreBtn, clearBtn) + hideBtn + 8.dp.toPx()
     }
 
+    // 候选行滚动状态：需在 state 分支前声明——ChineseCandidates 的 hasAnyMore
+    // 叠加 canScrollForward 判断（见分支内注释）
+    val candidateListState = rememberLazyListState()
+
     val displayCandidates: List<String>
     val displayAssociation: List<String>
     val displayComments: List<String>
@@ -173,7 +177,8 @@ fun CandidateBar(
             // 候选栏按设置的"每页候选词数"显示引擎当前页，可左右滑动查看放不下的候选
             displayCandidates = taken
             displayComments = s.comments
-            hasAnyMore = s.hasMore
+
+            hasAnyMore = s.hasMore || candidateListState.canScrollForward
             showLeftIcon = false
             displayAssociation = remember(s.associationCandidates, taken, s.inputText, textMeasurer) {
                 if (taken.isEmpty()) {
@@ -241,7 +246,6 @@ fun CandidateBar(
         else -> true
     }
 
-    val candidateListState = rememberLazyListState()
     LaunchedEffect(displayCandidates) {
         candidateListState.scrollToItem(0)
     }

@@ -116,7 +116,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: Xime ${{ steps.get_version.outputs.VERSION }}
-          generate_release_notes: true
+          generate_release_notes: false
           files: |
             ${{ steps.find_apks.outputs.main_apks }}
             ${{ steps.find_apks.outputs.plugin_xipks }}

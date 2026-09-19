@@ -245,6 +245,7 @@ class VoiceRecognitionHandler(
     private fun handleSpeechResult(text: String) {
         Log.d(TAG, "Speech result (final): $text")
 
+        val wasFinishing = finishing
         if (finishing) {
             // 收尾中收到最终结果：取消超时兜底，正常提交完整结果
             finishing = false
@@ -273,6 +274,14 @@ class VoiceRecognitionHandler(
             commitFinal(ic, punctuatedText, lastPartialText)
         }
         lastPartialText = ""
+
+        if (!wasFinishing) {
+            // 用户尚未松手就收到 final：流式在线插件按句回调属正常行为，该句已上屏，
+            // 会话继续，等松手才结束。绝不能触发 onVoiceComplete——它会把
+            // isVoiceMode/voiceRecordingStarted 清零，松手时容器的停止条件
+            // （isVoiceMode || isRecording）全部失效，录音线程会一直在后台运行。
+            return
+        }
         onVoiceComplete()
     }
     
@@ -347,9 +356,19 @@ class VoiceRecognitionHandler(
     private fun handleSpeechError(error: String, userVisible: Boolean) {
         Log.e(TAG, "Speech error: $error")
         FileLogger.e(TAG, "Speech error: $error")
+        val wasFinishing = finishing
         finishing = false
         mainHandler.removeCallbacks(finishTimeoutRunnable)
         lastPartialText = ""
+        if (!wasFinishing) {
+            // 用户尚未松手时引擎报错：UI 经 onVoiceComplete 恢复后松手停止链即失效，
+            // 必须在这里显式停止录音（释放麦克风/引擎连接）；置抑制标志丢弃错误后
+            // 可能迟到的部分结果，避免键盘恢复后文字继续往外蹦。
+            suppressDuplicateFinal = true
+            if (::speechRecognitionManager.isInitialized) {
+                speechRecognitionManager.stopRecognition()
+            }
+        }
         if (userVisible && error.isNotBlank()) {
             errorToast?.cancel()
             errorToast = Toast.makeText(context, error, Toast.LENGTH_LONG)

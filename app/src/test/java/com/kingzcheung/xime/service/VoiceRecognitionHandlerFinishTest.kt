@@ -59,6 +59,7 @@ class VoiceRecognitionHandlerFinishTest {
     private lateinit var onResult: (String) -> Unit
     private lateinit var onPartial: (String) -> Unit
     private lateinit var onState: (RecognitionState) -> Unit
+    private lateinit var onError: (String, Boolean) -> Unit
 
     @Before
     fun setup() {
@@ -90,13 +91,15 @@ class VoiceRecognitionHandlerFinishTest {
         val onResultCaptor = argumentCaptor<(String) -> Unit>()
         val onPartialCaptor = argumentCaptor<(String) -> Unit>()
         val onStateCaptor = argumentCaptor<(RecognitionState) -> Unit>()
+        val onErrorCaptor = argumentCaptor<(String, Boolean) -> Unit>()
         verify(mockManager).setCallbacks(
             onResultCaptor.capture(), onPartialCaptor.capture(), onStateCaptor.capture(),
-            any(), any(), any()
+            onErrorCaptor.capture(), any(), any()
         )
         onResult = onResultCaptor.firstValue
         onPartial = onPartialCaptor.firstValue
         onState = onStateCaptor.firstValue
+        onError = onErrorCaptor.firstValue
     }
 
     private fun runTimeouts() {
@@ -201,5 +204,41 @@ class VoiceRecognitionHandlerFinishTest {
 
         verify(mockInputConnection).setComposingText(eq("你好"), eq(1))
         assertEquals("你好", stateChanges.last().voiceRecognizedText)
+    }
+
+    @Test
+    fun `录音中收到流式最终结果则上屏该句但会话继续`() {
+        onPartial.invoke("你好")
+        // 用户尚未松手，流式插件按句回调 final：该句上屏，会话必须继续
+        onResult.invoke("你好")
+
+        // 提交了增量（composing 收尾 + 补句读），但不结束会话、不停止录音——
+        // 若此时触发 onVoiceComplete，松手停止链即失效，录音会一直在后台运行
+        verify(mockInputConnection).finishComposingText()
+        verify(mockInputConnection).commitText(eq("，"), eq(1))
+        verify(mockManager, never()).stopRecognition()
+        assertEquals(0, voiceCompleteCount)
+
+        // 随后松手：正常收尾结束会话
+        onPartial.invoke("世界")
+        handler.finishRecognition()
+        verify(mockManager).stopRecognition()
+        onResult.invoke("世界")
+        assertEquals(1, voiceCompleteCount)
+    }
+
+    @Test
+    fun `录音中引擎报错则停止录音并结束会话且丢弃迟到结果`() {
+        onError.invoke("网络断开", false)
+
+        // 录音中报错：必须显式停止录音并结束会话，否则 UI 恢复后松手停止链失效
+        verify(mockManager).stopRecognition()
+        assertEquals(1, voiceCompleteCount)
+
+        // 错误后迟到的部分/最终结果不再写入输入框（迟到 final 仍走一次幂等完成）
+        onPartial.invoke("你好")
+        onResult.invoke("你好世界")
+        verify(mockInputConnection, never()).setComposingText(any(), anyInt())
+        verify(mockInputConnection, never()).commitText(any(), anyInt())
     }
 }
