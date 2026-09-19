@@ -137,7 +137,8 @@ class JsVolcAsrPluginTest {
         val runtime = JsScriptRuntime(
             "com.kingzcheung.xime.plugin.volc_asr",
             dir, "main.js", store,
-            wsHostApi = mock
+            wsHostApi = mock,
+            injectAsr = true
         )
         try {
             assertTrue("main.js 应能加载", runtime.load())

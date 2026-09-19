@@ -3,6 +3,7 @@ package com.kingzcheung.xime.plugin.core.runtime.installer
 import android.app.Application
 import android.net.Uri
 import android.util.Log
+import com.kingzcheung.xime.plugin.core.model.PluginCapabilities
 import com.kingzcheung.xime.plugin.core.model.PluginInfo
 import com.kingzcheung.xime.plugin.core.model.PluginSource
 import com.kingzcheung.xime.plugin.core.model.PluginToolbarButton
@@ -242,6 +243,14 @@ class InstallerManager(
         /** 解析 manifest.json 文本（kotlinx 类型化解析），失败时携带可读的错误提示。 */
         internal fun parseManifestContent(content: String): PluginParseResult = try {
             val manifest = manifestJson.decodeFromString<PluginManifest>(content)
+            val capabilities = manifest.capabilities?.toModel()
+            // 类型 × 能力合理性校验：内建块错配 / 横切权限非常见组合在安装时落日志提示
+            // （宿主不消费错配块，故仅告警不阻断安装；开发期硬校验由 xipm check 承担）
+            capabilities?.let {
+                val (capErrors, capWarnings) = PluginCapabilities.validateForType(manifest.type, it)
+                capErrors.forEach { msg -> Log.w("PluginManifest", "[${manifest.id}] $msg") }
+                capWarnings.forEach { msg -> Log.w("PluginManifest", "[${manifest.id}] $msg") }
+            }
             val declaredHosts = manifest.network?.hosts.orEmpty()
                 .filter { it.isNotBlank() && isValidDeclaredHost(it) }
             val toolbarButtons = manifest.toolbarButtons
@@ -269,11 +278,10 @@ class InstallerManager(
                     allowCustomHosts = manifest.network?.allowCustomHosts ?: false,
                     toolbarButtons = toolbarButtons,
                     icon = manifest.icon?.takeIf { it.isNotBlank() },
-                    capabilities = manifest.capabilities?.toModel()
+                    capabilities = capabilities
                 )
             )
-        } catch (e: Exception) {
-            Log.e("InstallerManager", "parsePluginConfig yaml failed", e)
+        } catch (e: Exception) {            Log.e("InstallerManager", "parsePluginConfig yaml failed", e)
             PluginParseResult.Failure(manifestError(e))
         }
 

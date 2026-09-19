@@ -55,7 +55,7 @@ cargo run -- init my-plugin --type tool --parent /tmp/demo
 # 3. 编译（多文件 import 内联 → 单文件 main.js）
 cargo run -- build /tmp/demo/my-plugin --out /tmp/demo/out
 
-# 4. 写测试（骨架自带 main.test.ts 示例）并运行（内嵌 QuickJS + mock host，无需真机）
+# 4. 写测试（骨架自带 main.test.ts 示例）并运行（
 cargo run -- test /tmp/demo/my-plugin
 
 # 5. 校验清单

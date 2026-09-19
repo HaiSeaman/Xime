@@ -29,6 +29,9 @@ pub struct Manifest {
     pub min_host_version: Option<String>,
     #[serde(default)]
     pub max_host_version: Option<String>,
+    /// 能力声明（json5 保留原始结构；宿主是消费真相源，CLI 只做类型 × 能力合理性校验）。
+    #[serde(default)]
+    pub capabilities: Option<serde_json::Value>,
 }
 
 fn default_version() -> String {
@@ -76,6 +79,51 @@ impl Manifest {
             return Err("version 不能为空".to_string());
         }
         Ok(())
+    }
+
+    /// 类型 × 能力合理性校验（规则与宿主 PluginCapabilities.validateForType 一致）：
+    /// - 内建能力块与 type 错配 → errors（宿主不会消费错配块，声明只会误导）；
+    /// - 横切权限的非常见组合 → warnings（运行时按声明门禁，此处仅软提示）。
+    /// 返回 (errors, warnings)，文案面向插件作者。
+    pub fn validate_capabilities(&self) -> (Vec<String>, Vec<String>) {
+        const BUILTIN_TYPES: [&str; 5] = ["tool", "speech", "emoji", "clipboard_sync", "backup"];
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+        let Some(caps) = self.capabilities.as_ref().and_then(|c| c.as_object()) else {
+            return (errors, warnings);
+        };
+        if !BUILTIN_TYPES.contains(&self.r#type.as_str()) {
+            errors.push(format!(
+                "未知插件类型: {}（允许: tool/speech/emoji/clipboard_sync/backup）",
+                self.r#type
+            ));
+            return (errors, warnings);
+        }
+        for key in caps.keys() {
+            if BUILTIN_TYPES.contains(&key.as_str()) && key != &self.r#type {
+                errors.push(format!(
+                    "capabilities.{key} 与插件类型 {} 不匹配（此块仅 {key} 型插件声明），宿主不会消费该块",
+                    self.r#type
+                ));
+            }
+        }
+        // 横切权限典型适用类型（软校验，与宿主 CROSS_CUTTING_TYPICAL 一致）
+        const TYPICAL: [(&str, &[&str]); 3] = [
+            ("clipboard_read", &["clipboard_sync", "tool"]),
+            ("candidate_transform", &["tool"]),
+            ("quick_send_read", &["tool"]),
+        ];
+        for (cap, types) in TYPICAL {
+            let declared = caps.get(cap).and_then(|v| v.as_bool()).unwrap_or(false);
+            if declared && !types.contains(&self.r#type.as_str()) {
+                warnings.push(format!(
+                    "{} 型插件声明了 capabilities.{cap}（典型用于 {} 型），请确认非误报",
+                    self.r#type,
+                    types.join("/")
+                ));
+            }
+        }
+        (errors, warnings)
     }
 }
 
@@ -162,5 +210,60 @@ mod tests {
             json5::from_str(r#"{ "id": "a", "futureField": 123, "capabilities": { "events": [] } }"#)
                 .unwrap();
         assert_eq!(manifest.id, "a");
+    }
+
+    #[test]
+    fn capabilities_block_type_mismatch_is_error() {
+        let manifest: Manifest = json5::from_str(
+            r#"{ "id": "a", "type": "emoji", "capabilities": { "emoji": { "columns": 3 }, "tool": { "display": "direct" } } }"#,
+        )
+        .unwrap();
+        let (errors, warnings) = manifest.validate_capabilities();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("capabilities.tool"));
+        assert!(errors[0].contains("emoji"));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn cross_cutting_capability_unusual_type_is_warning() {
+        let manifest: Manifest = json5::from_str(
+            r#"{ "id": "a", "type": "emoji", "capabilities": { "emoji": {}, "clipboard_read": true } }"#,
+        )
+        .unwrap();
+        let (errors, warnings) = manifest.validate_capabilities();
+        assert!(errors.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("clipboard_read"));
+    }
+
+    #[test]
+    fn typical_capability_combinations_pass_silently() {
+        // tool + clipboard_read + candidate_transform + quick_send_read：典型组合零告警
+        let manifest: Manifest = json5::from_str(
+            r#"{ "id": "a", "type": "tool", "capabilities": { "tool": { "display": "direct" }, "clipboard_read": true, "candidate_transform": true, "quick_send_read": true } }"#,
+        )
+        .unwrap();
+        let (errors, warnings) = manifest.validate_capabilities();
+        assert!(errors.is_empty());
+        assert!(warnings.is_empty());
+
+        // clipboard_sync + clipboard_read：典型组合零告警
+        let manifest: Manifest = json5::from_str(
+            r#"{ "id": "b", "type": "clipboard_sync", "capabilities": { "clipboard_sync": { "protocols": ["ximed"] }, "clipboard_read": true } }"#,
+        )
+        .unwrap();
+        let (errors, warnings) = manifest.validate_capabilities();
+        assert!(errors.is_empty());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn unknown_type_is_error() {
+        let manifest: Manifest =
+            json5::from_str(r#"{ "id": "a", "type": "widget", "capabilities": {} }"#).unwrap();
+        let (errors, _) = manifest.validate_capabilities();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("widget"));
     }
 }

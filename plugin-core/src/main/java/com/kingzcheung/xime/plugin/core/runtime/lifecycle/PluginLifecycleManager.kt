@@ -157,7 +157,9 @@ class PluginLifecycleManager(
                 } else null,
                 clipboardHostApi = if (plugin.capabilities?.clipboardRead == true) {
                     PluginManager.clipboardHostApiFactory?.invoke(plugin.id)
-                } else null
+                } else null,
+                // host.asr 上行表仅 speech 型插件注入
+                injectAsr = plugin.type == "speech"
             )
             // 按能力声明启用下行事件通道：未声明 events 的插件零开销、零行为变化。
             runtime.initEvents(plugin.capabilities?.events?.toSet() ?: emptySet())

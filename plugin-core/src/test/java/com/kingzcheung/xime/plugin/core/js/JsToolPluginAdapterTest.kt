@@ -92,25 +92,15 @@ class JsToolPluginAdapterTest {
 
     @Test
     fun `getPanelState inputText 缺省回退上下文 空串表示明确空输入框`() {
-        fun adapterReturning(state: String): JsToolPluginAdapter =
-            createAdapter(
-                writeScript(
-                    """
-                    globalThis.plugin = {
-                      getPanelState: function(inputText) {
-                        return { $state };
-                      }
-                    }
-                    """.trimIndent()
-                )
-            )
-        // 缺省（未返回 inputText 字段）= 沿用宿主上下文
-        assertEquals("ctx", adapterReturning("items: []").getPanelState("ctx").inputText)
-        // 返回 null/非字符串同样回退
-        assertEquals("ctx", adapterReturning("inputText: null, items: []").getPanelState("ctx").inputText)
-        assertEquals("ctx", adapterReturning("inputText: 42, items: []").getPanelState("ctx").inputText)
+        // 纯函数契约（引擎无关）：与宿主 PluginCapabilities.validateForType 同样可离线验证
+        fun resolve(raw: Any?): String = JsToolPluginAdapter.inputTextFromState(raw, "ctx")
+        // 缺省（未返回 inputText 字段 → null）或非字符串 = 沿用宿主上下文
+        assertEquals("ctx", resolve(null))
+        assertEquals("ctx", resolve(42))
         // 空串 = 插件明确要求空输入框（如翻译插件拒绝剪贴板预填），宿主不得再用上下文兜底
-        assertEquals("", adapterReturning("inputText: \"\", items: []").getPanelState("ctx").inputText)
+        assertEquals("", resolve(""))
+        // 正常回显
+        assertEquals("预填", resolve("预填"))
     }
 
     @Test

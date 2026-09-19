@@ -43,8 +43,10 @@ class JsHostCapabilityTest {
               hasConfig: host.has('config'),
               hasWs: host.has('ws'),
               hasClipboard: host.has('clipboard'),
+              hasAsr: host.has('asr'),
               wsType: typeof host.ws,
               clipboardType: typeof host.clipboard,
+              asrType: typeof host.asr,
               jsonMissing: host.config.getJson('missing'),
               jsonBad: host.config.getJson('bad'),
               jsonEmpty: host.config.getJson('empty'),
@@ -58,7 +60,7 @@ class JsHostCapabilityTest {
         };
     """.trimIndent()
 
-    private fun makeRuntime(clipboard: ClipboardHostApi? = null): JsScriptRuntime {
+    private fun makeRuntime(clipboard: ClipboardHostApi? = null, injectAsr: Boolean = false): JsScriptRuntime {
         val dir = tmp.newFolder("cap-probe")
         File(dir, "main.js").writeText(probeJs)
         val store = InMemoryConfigStore().apply {
@@ -71,7 +73,8 @@ class JsHostCapabilityTest {
             pluginDir = dir,
             entryScript = "main.js",
             configStore = store,
-            clipboardHostApi = clipboard
+            clipboardHostApi = clipboard,
+            injectAsr = injectAsr
         )
     }
 
@@ -84,7 +87,8 @@ class JsHostCapabilityTest {
 
             val caps = out["caps"].toString()
             assertTrue("恒有能力应在 caps 中: $caps", caps.contains("config"))
-            assertTrue("asr 恒有: $caps", caps.contains("asr"))
+            // asr 上行表仅 speech 型注入（构造参数默认关）：非 speech 型不应出现
+            assertFalse("非 speech 型不应注入 asr: $caps", caps.contains("asr"))
             assertFalse("未注入能力不应在 caps 中: $caps", caps.contains("ws"))
             assertFalse("未注入能力不应在 caps 中: $caps", caps.contains("clipboard"))
             assertFalse("未注入能力不应在 caps 中: $caps", caps.contains("http"))
@@ -119,6 +123,20 @@ class JsHostCapabilityTest {
             assertEquals("object", out["clipboardType"]?.toString())
             assertEquals("剪贴板内容", out["clipboardValue"]?.toString())
             assertEquals("ws 仍未注入", false, out["hasWs"])
+        } finally {
+            runtime.close()
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `speech 型注入 asr 上行表`() {
+        val runtime = makeRuntime(injectAsr = true)
+        try {
+            assertTrue(runtime.load())
+            val out = runtime.call("probe") as Map<*, *>
+            assertTrue("speech 型应注入 asr: ${out["caps"]}", out["caps"].toString().contains("asr"))
+            assertEquals(true, out["hasAsr"])
+            assertEquals("object", out["asrType"]?.toString())
         } finally {
             runtime.close()
         }

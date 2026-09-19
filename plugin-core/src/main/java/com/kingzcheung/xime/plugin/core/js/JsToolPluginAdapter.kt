@@ -24,10 +24,9 @@ class JsToolPluginAdapter(
             protocolWarn("getPanelState 必须返回对象（当前为 ${result?.javaClass?.simpleName ?: "null"}），已按空状态处理")
             return ToolPanelState(inputText = inputText)
         }
-        // inputText 契约：缺省（未返回/非字符串）= 沿用宿主上下文；空串 = 明确要求空输入框
-        val input = (map["inputText"] as? String) ?: inputText
+        // inputText 契约见 inputTextFromState
         return ToolPanelState(
-            inputText = input,
+            inputText = inputTextFromState(map["inputText"], inputText),
             items = parseResultItems(map["items"], "getPanelState.items"),
             loading = (map["loading"] as? Boolean) ?: false,
             ui = parseUiNodes(stringListForUi(map["ui"])),
@@ -48,5 +47,16 @@ class JsToolPluginAdapter(
 
     override fun onPanelItemClick(itemId: String) {
         runtime.call(JsPluginContract.PATH_PANEL_ON_ITEM_CLICK, mapOf("itemId" to itemId))
+    }
+
+    companion object {
+        /**
+         * inputText 契约解析：插件未返回该字段或返回非字符串 → 沿用宿主上下文（hostInput）；
+         * 返回空串 → 明确要求空输入框（如翻译插件拒绝剪贴板预填），宿主不得再用上下文兜底。
+         * 纯函数抽出以便引擎无关的单测。
+         */
+        @JvmStatic
+        fun inputTextFromState(raw: Any?, hostInput: String): String =
+            (raw as? String) ?: hostInput
     }
 }

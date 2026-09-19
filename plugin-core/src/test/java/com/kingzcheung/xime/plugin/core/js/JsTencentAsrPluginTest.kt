@@ -110,7 +110,8 @@ class JsTencentAsrPluginTest {
             "com.kingzcheung.xime.plugin.tencent_asr",
             dir, "main.js", store,
             wsHostApi = ws,
-            cryptoHostApi = RealHmacCryptoHostApi()
+            cryptoHostApi = RealHmacCryptoHostApi(),
+            injectAsr = true
         )
     }
 

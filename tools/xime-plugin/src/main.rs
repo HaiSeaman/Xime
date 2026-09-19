@@ -29,13 +29,14 @@ enum Commands {
     Pack(PackArgs),
     /// 校验：manifest.json（宽松 JSON）字段与格式检查
     Check(CheckArgs),
-    /// 运行插件测试（内嵌 QuickJS + mock host，无需真机）：main.test.ts → 结果
+    /// 运行插件测试（：main.test.ts → 结果
     Test(TestArgs),
     /// 真机热调试：watch 源码 → 编译打包 → adb 推送 → 广播安装/重载 → 日志跟随
     Dev(DevArgs),
     /// 真机插件日志：实时跟随（logcat）或历史错误（errors.jsonl）
     Logs(LogsArgs),
-    /// 创建插件骨架（main.ts + manifest.json + SDK 类型 + tsconfig）
+    /// 创建插件骨架（main.ts + manifest.json + SDK 类型 + tsconfig + main.test.ts）
+    #[command(alias = "new")]
     Init(InitArgs),
 }
 
@@ -94,6 +95,9 @@ struct CheckArgs {
     /// 批量模式：插件根目录
     #[arg(long, default_value = "plugins")]
     plugins_dir: PathBuf,
+    /// 编译产物根目录（扩展点一致性检查基于编译产物；同 build --out）
+    #[arg(long, default_value = "build/plugin-js")]
+    out: PathBuf,
 }
 
 #[derive(Args)]
@@ -177,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Build(args) => run_build(args).await,
         Commands::Pack(args) => run_pack(args).await,
-        Commands::Check(args) => run_check(args),
+        Commands::Check(args) => run_check(args).await,
         Commands::Test(args) => run_test(args).await,
         Commands::Dev(args) => dev::run_dev(dev::DevArgs {
             dir: args.dir,
@@ -301,7 +305,7 @@ async fn run_pack(args: PackArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_check(args: CheckArgs) -> anyhow::Result<()> {
+async fn run_check(args: CheckArgs) -> anyhow::Result<()> {
     let plugin_dirs = match resolve_mode(args.all, &args.dir, &args.plugins_dir) {
         Mode::All => scan_plugin_dirs(&args.plugins_dir)?,
         Mode::Single(dir) => vec![dir],
@@ -315,6 +319,54 @@ fn run_check(args: CheckArgs) -> anyhow::Result<()> {
                     "✓ {} ({}) type={} entry={}",
                     manifest.id, manifest.version, manifest.r#type, manifest.entry
                 );
+                // 类型 × 能力合理性校验：内建块错配按失败计，可疑组合仅提示
+                let (cap_errors, cap_warnings) = manifest.validate_capabilities();
+                for e in &cap_errors {
+                    eprintln!("  ✗ {e}");
+                }
+                for w in &cap_warnings {
+                    println!("  ⚠ {w}");
+                }
+                failed += cap_errors.len();
+
+                // 扩展点一致性校验（需编译产物；缺失则跳过并提示，先运行 xipm build）
+                match find_built_main_js(&dir, &args.out) {
+                    None => println!("  ! 未找到编译产物 main.js，跳过扩展点检查（先运行 xipm build）"),
+                    Some(path) => {
+                        let main_js = std::fs::read_to_string(&path)?;
+                        let inspect = tokio::time::timeout(
+                            test_engine::TEST_TIMEOUT,
+                            test_engine::inspect_extensions(
+                                main_js,
+                                &manifest.id,
+                                path.parent().map(|p| p.join("resources")).unwrap_or_default(),
+                            ),
+                        )
+                        .await;
+                        match inspect {
+                            Err(_) => {
+                                eprintln!("  ✗ 扩展点检查超时（{}）", path.display());
+                                failed += 1;
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!("  ✗ 产物加载失败（{}）: {e}", path.display());
+                                failed += 1;
+                            }
+                            Ok(Ok(declared)) => {
+                                let (ext_errors, ext_warnings) =
+                                    test_engine::validate_extensions(&declared, &manifest.r#type);
+                                for e in &ext_errors {
+                                    eprintln!("  ✗ {e}");
+                                    failed += 1;
+                                }
+                                for w in &ext_warnings {
+                                    println!("  ⚠ {w}");
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // TS 源码存在性提示（非强制：纯 JS 插件可无 main.ts）
                 if !dir.join("main.ts").is_file() && !dir.join("main.js").is_file() {
                     println!("  ! 缺少入口源码 main.ts（或 main.js）");
@@ -331,6 +383,21 @@ fn run_check(args: CheckArgs) -> anyhow::Result<()> {
         anyhow::bail!("{failed} 个插件校验失败");
     }
     Ok(())
+}
+
+/// 定位插件的编译产物 main.js：插件目录直置（纯 JS 插件）优先，
+/// 其次 build 输出根下的同名目录（xipm build 的默认布局）。
+fn find_built_main_js(dir: &Path, out_root: &Path) -> Option<PathBuf> {
+    let direct = dir.join("main.js");
+    if direct.is_file() {
+        return Some(direct);
+    }
+    let name = dir.file_name()?;
+    let built = out_root.join(name).join("main.js");
+    if built.is_file() {
+        return Some(built);
+    }
+    None
 }
 
 async fn run_test(args: TestArgs) -> anyhow::Result<()> {
@@ -411,6 +478,6 @@ fn run_init(args: InitArgs) -> anyhow::Result<()> {
     std::fs::write(target.join(".gitignore"), "dist/\n")?;
 
     println!("✓ 已创建插件骨架 {}", target.display());
-    println!("  下一步：xipm test .（内嵌 QuickJS + mock host，无需真机）与 xipm build --out dist");
+    println!("  下一步：xipm test .（与 xipm build --out dist");
     Ok(())
 }

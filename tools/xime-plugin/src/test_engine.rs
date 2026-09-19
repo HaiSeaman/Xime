@@ -20,7 +20,6 @@ fn eval_opts(name: &str) -> EvalOptions {
 
 use crate::engine_state::NativeState;
 use crate::manifest::Manifest;
-
 /// 单个用例结果（JS 侧 __ximeRunTests 返回的原始对象）。
 #[derive(Debug, Clone, rquickjs::FromJs)]
 pub struct TestCase {
@@ -368,3 +367,159 @@ fn source_line_from_stack(stack: &str) -> Option<String> {
 // 让未使用的 PathBuf/Duration 引用保持语义清晰（超时参数由调用方使用）。
 #[allow(dead_code)]
 fn _unused(_p: &PathBuf, _d: Duration) {}
+// ─────────────────────────────────────────────────────────────────────────────
+// 扩展点一致性检查（xipm check）：加载编译产物 → 枚举 globalThis.plugin 扩展点
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// manifest type → 必需扩展点键（宿主按类型实例化 Adapter，只调用对应扩展点）。
+fn required_extension(type_name: &str) -> Option<&'static str> {
+    match type_name {
+        "tool" => Some("panel"),
+        "speech" => Some("speech"),
+        "emoji" => Some("emoji"),
+        "clipboard_sync" => Some("clipboardSync"),
+        "backup" => Some("backup"),
+        _ => None,
+    }
+}
+
+/// 内建扩展点键（与 BUILTIN_TYPES 一一对应；clipboard_sync 的键为 clipboardSync）。
+fn is_builtin_extension_key(key: &str) -> bool {
+    matches!(key, "panel" | "speech" | "emoji" | "clipboardSync" | "backup")
+}
+
+/// 扩展点声明与 manifest type 的一致性校验（纯函数，可离线单测）：
+/// - 缺少本类型的必需扩展点 → error（emoji/speech 等类型的扩展点即插件本体）；
+///   tool 型例外：panel 缺失仅 warning（纯管线型 tool——候选变换/事件——不开面板，合法）；
+/// - 声明了其他类型的扩展点 → error（宿主按类型路由，永远不会被调用）。
+/// 横切键（events/settings/transform/ws/sse/onLoad/onUnload）任何类型均可声明。
+/// 返回 (errors, warnings)，文案面向插件作者。
+pub fn validate_extensions(declared: &[String], type_name: &str) -> (Vec<String>, Vec<String>) {
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let Some(required) = required_extension(type_name) else {
+        return (errors, warnings); // 未知类型已在 capabilities 校验中报错，此处不重复
+    };
+    if !declared.iter().any(|k| k == required) {
+        let msg = format!(
+            "{type_name} 型插件应声明 {required} 扩展点（缺失时宿主侧该能力为空）"
+        );
+        // 纯管线型 tool（候选变换/事件订阅，无工具栏入口）不开面板是合法形态
+        if type_name == "tool" {
+            warnings.push(format!(
+                "{msg}；纯管线型 tool（仅 transform/events）可忽略"
+            ));
+        } else {
+            errors.push(msg);
+        }
+    }
+    for key in declared {
+        if is_builtin_extension_key(key) && key != required {
+            errors.push(format!(
+                "扩展点 {key} 与插件类型 {type_name} 不匹配（宿主只调用 {required}），该扩展点永远不会被调用"
+            ));
+        }
+    }
+    (errors, warnings)
+}
+
+/// 加载编译产物（bootstrap + main.js）并枚举 globalThis.plugin 的顶层键。
+/// 入口未定义插件对象时返回错误（与冒烟检查同口径）。
+pub async fn inspect_extensions(
+    main_js: String,
+    plugin_id: &str,
+    resources_dir: PathBuf,
+) -> Result<Vec<String>> {
+    crate::engine_state::set(NativeState {
+        plugin_id: plugin_id.to_string(),
+        resources_dir,
+        main_js,
+        test_js: String::new(),
+    });
+    let runtime = AsyncRuntime::new()?;
+    let context = AsyncContext::full(&runtime).await?;
+    let declared = context
+        .async_with(inspect_in_ctx)
+        .await
+        .map_err(|e: rquickjs::Error| anyhow::anyhow!("引擎执行失败: {e}"))?;
+    Ok(declared)
+}
+
+///（fn item：`async_with` 要求 `for<'js>`，与 run_tests_in_ctx 同理）
+async fn inspect_in_ctx<'js>(ctx: Ctx<'js>) -> rquickjs::Result<Vec<String>> {
+    install_native_bindings(&ctx)?;
+    ctx.eval_with_options::<(), _>(crate::engine_js::BOOTSTRAP_JS, eval_opts("xime-bootstrap.js"))?;
+    let main_js = crate::engine_state::with(|s| s.main_js.clone());
+    ctx.eval_with_options::<(), _>(main_js, eval_opts("main.js"))?;
+    let keys: String = ctx.eval_with_options(
+        "(function(){var p=globalThis.plugin;if(!p||typeof p!=='object')return '';return JSON.stringify(Object.keys(p));})()",
+        eval_opts("xime-inspect.js"),
+    )?;
+    if keys.is_empty() {
+        return Err(rquickjs::Error::new_from_js_message(
+            "plugin",
+            "object",
+            "加载后 globalThis.plugin 不是对象（入口未定义插件）",
+        ));
+    }
+    serde_json::from_str(&keys)
+        .map_err(|e| rquickjs::Error::new_from_js_message("plugin", "keys", e.to_string()))
+}
+
+#[cfg(test)]
+mod extension_check_tests {
+    use super::validate_extensions;
+
+    fn declared(keys: &[&str]) -> Vec<String> {
+        keys.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn tool_without_panel_is_warning() {
+        // 纯管线型 tool（仅 transform/events）不开面板是合法形态，仅提示
+        let (errors, warnings) = validate_extensions(&declared(&["transform", "events"]), "tool");
+        assert!(errors.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("panel"));
+    }
+
+    #[test]
+    fn builtin_extension_of_other_type_is_error() {
+        // emoji 型声明了 panel：缺 emoji 是 error + panel 错配是 error
+        let (errors, warnings) = validate_extensions(&declared(&["panel"]), "emoji");
+        assert_eq!(errors.len(), 2);
+        assert!(errors.iter().any(|e| e.contains("emoji 扩展点")));
+        assert!(errors.iter().any(|e| e.contains("panel") && e.contains("emoji")));
+        assert!(warnings.is_empty());
+
+        // tool 型声明了 panel（正确）+ backup（错配）：只有 backup 一条 error
+        let (errors, warnings) = validate_extensions(&declared(&["panel", "backup"]), "tool");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("backup"));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn correct_declaration_passes() {
+        let cases = [
+            (&["panel", "events", "settings"][..], "tool"),
+            (&["speech", "ws"][..], "speech"),
+            (&["emoji"][..], "emoji"),
+            (&["clipboardSync"][..], "clipboard_sync"),
+            (&["backup"][..], "backup"),
+        ];
+        for (keys, ty) in cases {
+            let (errors, warnings) = validate_extensions(&declared(keys), ty);
+            assert!(errors.is_empty(), "{ty}: {errors:?}");
+            assert!(warnings.is_empty(), "{ty}: {warnings:?}");
+        }
+    }
+
+    #[test]
+    fn unknown_type_skipped() {
+        // 未知类型在 capabilities 校验中已报错，此处不重复
+        let (errors, warnings) = validate_extensions(&declared(&["panel"]), "widget");
+        assert!(errors.is_empty());
+        assert!(warnings.is_empty());
+    }
+}

@@ -78,6 +78,9 @@ class JsScriptRuntime(
     private val sseHostApi: SseHostApi? = null,
     private val quickSendHostApi: QuickSendHostApi? = null,
     private val clipboardHostApi: ClipboardHostApi? = null,
+    /** speech 型插件才注入 `host.asr` 上行表（emitFinal/emitPartial/...）；
+     *  非 speech 型不注入，保持"未声明的 API 不存在"的横切门禁口径。 */
+    private val injectAsr: Boolean = false,
     private val callTimeoutMs: Long = CALL_TIMEOUT_MS,
     private val callbackTimeoutMs: Long = CALLBACK_TIMEOUT_MS
 ) {
@@ -304,8 +307,10 @@ class JsScriptRuntime(
                 injectedCapabilities.add("crypto")
                 define("crypto") { buildCryptoTable() }
             }
-            injectedCapabilities.add("asr")
-            define("asr") { buildAsrEmitTable() }
+            if (injectAsr) {
+                injectedCapabilities.add("asr")
+                define("asr") { buildAsrEmitTable() }
+            }
             if (quickSendHostApi != null) {
                 injectedCapabilities.add("quickSend")
                 define("quickSend") { buildQuickSendTable() }

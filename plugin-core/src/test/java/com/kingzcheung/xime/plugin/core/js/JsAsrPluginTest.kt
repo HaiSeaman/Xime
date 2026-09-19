@@ -97,7 +97,8 @@ class JsAsrPluginTest {
         val runtime = JsScriptRuntime(
             "com.kingzcheung.xime.plugin.funasr_asr",
             dir, "main.js", store,
-            wsHostApi = mock
+            wsHostApi = mock,
+            injectAsr = true
         )
         try {
             assertTrue("main.js 应能加载", runtime.load())
