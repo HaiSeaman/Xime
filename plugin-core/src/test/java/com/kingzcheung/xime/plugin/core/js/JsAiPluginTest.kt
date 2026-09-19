@@ -155,7 +155,7 @@ class JsAiPluginTest {
             assertTrue("main.js 应能加载", runtime.load())
             val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_reply", runtime, store)
 
-            adapter.onPanelInput("明天有空吗")
+            adapter.onPanelInput("", "明天有空吗")
             adapter.onPanelAction("generate")
 
             val state = adapter.getPanelState("明天有空吗")
@@ -183,7 +183,7 @@ class JsAiPluginTest {
             assertTrue(runtime.load())
             val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_reply", runtime, store)
 
-            adapter.onPanelInput("你好")
+            adapter.onPanelInput("", "你好")
             adapter.onPanelAction("generate")
             assertTrue("未配置 Key 不应产生候选", adapter.getPanelState("你好").items.isEmpty())
         } finally {
@@ -208,7 +208,7 @@ class JsAiPluginTest {
             assertTrue(runtime.load())
             val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_reply", runtime, store)
 
-            adapter.onPanelInput("明天有空吗")
+            adapter.onPanelInput("", "明天有空吗")
             adapter.onPanelAction("generate")
             assertTrue("生成后应有候选", adapter.getPanelState("明天有空吗").items.isNotEmpty())
 
@@ -239,7 +239,7 @@ class JsAiPluginTest {
             assertTrue(runtime.load())
             val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_reply", runtime, store)
 
-            adapter.onPanelInput("明天有空吗")
+            adapter.onPanelInput("", "明天有空吗")
             adapter.onPanelAction("generate")
             assertTrue(adapter.getPanelState("明天有空吗").items.isNotEmpty())
 
@@ -269,7 +269,7 @@ class JsAiPluginTest {
             assertTrue("main.js 应能加载", runtime.load())
             val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_write", runtime, store)
 
-            adapter.onPanelInput("帮我写一条好评")
+            adapter.onPanelInput("", "帮我写一条好评")
             adapter.onPanelAction("generate")
 
             var state = adapter.getPanelState("帮我写一条好评")
@@ -322,7 +322,7 @@ class JsAiPluginTest {
             assertTrue("main.js 应能加载", runtime.load())
             val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_translate", runtime, store)
 
-            adapter.onPanelInput("你好世界")
+            adapter.onPanelInput("", "你好世界")
             adapter.onPanelAction("generate")
 
             assertEquals("应发起 SSE 流式连接", 1, sse.connectedCount)
@@ -345,6 +345,47 @@ class JsAiPluginTest {
             state = adapter.getPanelState("你好世界")
             assertFalse("onDone 后不再加载", state.loading)
             assertEquals("译文解析", "Hello world", state.items.single().text)
+        } finally {
+            runtime.close()
+        }
+    }
+
+    @Test
+    fun `ai-translate 控件行与互换语言`() {
+        val store = aiStore()
+        val dir = writePlugin("ai-translate")
+        val runtime = JsScriptRuntime(
+            "com.kingzcheung.xime.plugin.ai_translate", dir, "main.js", store
+        )
+        try {
+            assertTrue("main.js 应能加载", runtime.load())
+            val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_translate", runtime, store)
+
+            val state = adapter.getPanelState("ctx")
+            // 翻译插件明确要求空输入框（契约：空串 = 拒绝宿主上下文/剪贴板预填）
+            assertEquals("", state.inputText)
+            // 控件行：源语言 select + 互换 button + 目标语言 select
+            val ui = state.ui
+            assertNotNull("direct 面板应声明控件行", ui)
+            assertEquals(3, ui!!.size)
+            assertEquals(UiNodeType.SELECT, ui[0].type)
+            assertEquals("sourceLang", ui[0].key)
+            assertEquals(UiNodeType.BUTTON, ui[1].type)
+            assertEquals("swapLang", ui[1].key)
+            assertEquals(UiNodeType.SELECT, ui[2].type)
+            assertEquals("targetLang", ui[2].key)
+
+            // 语言选择经 onInput 回流并持久化到配置
+            adapter.onPanelInput("sourceLang", "English")
+            adapter.onPanelInput("targetLang", "日本語")
+            assertEquals("English", store.get("sourceLang"))
+            assertEquals("日本語", store.get("targetLang"))
+
+            // 互换按钮后宿主重拉 state：源/目标对调
+            adapter.onPanelAction("swapLang")
+            val swapped = adapter.getPanelState("")
+            assertEquals("日本語", swapped.ui!![0].value)
+            assertEquals("English", swapped.ui!![2].value)
         } finally {
             runtime.close()
         }

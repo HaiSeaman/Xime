@@ -29,7 +29,7 @@ class JsToolPluginAdapterTest {
     }
 
     private fun writeScript(content: String): File {
-        val dir = tempFolder.newFolder("tool-plugin")
+        val dir = tempFolder.newFolder("tool-plugin", System.nanoTime().toString())
         File(dir, "main.js").writeText(content)
         return dir
     }
@@ -75,7 +75,7 @@ class JsToolPluginAdapterTest {
     }
 
     @Test
-    fun `getPanelState 未实现时返回空状态`() {
+    fun `getPanelState 未实现时回退宿主上下文`() {
         val dir = writeScript(
             """
             globalThis.plugin = {
@@ -85,8 +85,32 @@ class JsToolPluginAdapterTest {
         )
         val adapter = createAdapter(dir)
         val state = adapter.getPanelState("x")
-        assertEquals("", state.inputText)
+        // 协议失败/未实现时回退宿主上下文（面板输入框仍有预填可用）
+        assertEquals("x", state.inputText)
         assertTrue(state.items.isEmpty())
+    }
+
+    @Test
+    fun `getPanelState inputText 缺省回退上下文 空串表示明确空输入框`() {
+        fun adapterReturning(state: String): JsToolPluginAdapter =
+            createAdapter(
+                writeScript(
+                    """
+                    globalThis.plugin = {
+                      getPanelState: function(inputText) {
+                        return { $state };
+                      }
+                    }
+                    """.trimIndent()
+                )
+            )
+        // 缺省（未返回 inputText 字段）= 沿用宿主上下文
+        assertEquals("ctx", adapterReturning("items: []").getPanelState("ctx").inputText)
+        // 返回 null/非字符串同样回退
+        assertEquals("ctx", adapterReturning("inputText: null, items: []").getPanelState("ctx").inputText)
+        assertEquals("ctx", adapterReturning("inputText: 42, items: []").getPanelState("ctx").inputText)
+        // 空串 = 插件明确要求空输入框（如翻译插件拒绝剪贴板预填），宿主不得再用上下文兜底
+        assertEquals("", adapterReturning("inputText: \"\", items: []").getPanelState("ctx").inputText)
     }
 
     @Test
@@ -153,14 +177,16 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              lastInput: "",
+              lastKey: "",
+              lastValue: "",
               lastAction: "",
               lastItem: "",
               getPanelState: function() { return {}; },
-              onPanelInput: function(text) { this.lastInput = text; },
+              onPanelInput: function(e) { this.lastKey = e.key; this.lastValue = e.value; },
               onPanelAction: function(actionId) { this.lastAction = actionId; },
               onPanelItemClick: function(itemId) { this.lastItem = itemId; },
-              _lastInput: function() { return this.lastInput; },
+              _lastKey: function() { return this.lastKey; },
+              _lastValue: function() { return this.lastValue; },
               _lastAction: function() { return this.lastAction; },
               _lastItem: function() { return this.lastItem; }
             }
@@ -176,8 +202,14 @@ class JsToolPluginAdapterTest {
         val info = PluginInfo(id = "com.test.tool", name = "测试工具", description = "测试", iconResId = 0, versionCode = 1, versionName = "1.0", path = File(dir, "main.js").absolutePath, type = "tool")
         val adapter = JsToolPluginAdapter(runtime, PluginContext(application = Application(), pluginInfo = info, configStore = InMemoryConfigStore()))
 
-        adapter.onPanelInput("你好")
-        assertEquals("你好", runtime.call("_lastInput")?.toString())
+        // key 空串 = 主输入框；非空 key（控件行字段）原样透传
+        adapter.onPanelInput("", "你好")
+        assertEquals("", runtime.call("_lastKey")?.toString())
+        assertEquals("你好", runtime.call("_lastValue")?.toString())
+
+        adapter.onPanelInput("sourceLang", "English")
+        assertEquals("sourceLang", runtime.call("_lastKey")?.toString())
+        assertEquals("English", runtime.call("_lastValue")?.toString())
 
         adapter.onPanelAction("generate")
         assertEquals("generate", runtime.call("_lastAction")?.toString())

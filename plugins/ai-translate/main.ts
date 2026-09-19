@@ -11,14 +11,30 @@ const KEY_API_KEY = 'apiKey';
 const KEY_BASE_URL = 'baseUrl';
 const KEY_MODEL = 'model';
 const KEY_TARGET_LANG = 'targetLang';
+const KEY_SOURCE_LANG = 'sourceLang';
 const KEY_PROMPT = 'prompt';
 
 const DEFAULTS = {
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
+  sourceLang: '自动检测',
   targetLang: '简体中文',
-  prompt: '你是专业翻译。请把下面的内容翻译成{targetLang}，只输出译文，不要解释、不要引号。\n{context}',
+  prompt: `你是一个高质量翻译引擎。请将 <text> 标签中的内容翻译成{targetLang}（原文语言：{sourceLang}）。
+要求：
+1. 只输出译文本身，不要任何解释、注释、引号或前后缀；
+2. 译文符合{targetLang}的表达习惯，自然流畅，保持原文的语气与正式程度；
+3. 保留原文的换行、分段、列表与 Markdown 格式；
+4. 代码、命令、URL、邮箱、@提及、数字与符号原样保留，品牌名与专有名词不译，emoji 保留；
+5. 若原文本身已是{targetLang}，原样输出，不要改写。
+
+<text>
+{context}
+</text>`,
 };
+
+// 面板语言选择行的选项（显示与回传值相同，直接作为 {targetLang} 进 prompt）
+const SOURCE_LANGS = ['自动检测', '简体中文', '繁體中文', 'English', '日本語', '한국어', 'Français', 'Deutsch', 'Español', 'Русский'];
+const TARGET_LANGS = SOURCE_LANGS.filter((l) => l !== '自动检测');
 
 /** 面板候选条目（宿主渲染并点选上屏）。 */
 interface ResultItem {
@@ -31,9 +47,26 @@ let buffer = '';
 let generating = false;
 let sessionId = -1;
 
+function currentSourceLang(): string {
+  return host.config.get(KEY_SOURCE_LANG) || DEFAULTS.sourceLang;
+}
+
+function currentTargetLang(): string {
+  return host.config.get(KEY_TARGET_LANG) || DEFAULTS.targetLang;
+}
+
 function buildItems(): ResultItem[] {
   if (buffer === '') return [];
   return [{ id: 'result', text: buffer }];
+}
+
+/** 面板控件行：源语言选择 + 互换键 + 目标语言选择（宿主渲染，值经 onInput/onAction 回流）。 */
+function buildControlsUi(): XimeUiNode[] {
+  return [
+    { type: 'select', key: KEY_SOURCE_LANG, label: '源语言', value: currentSourceLang(), options: SOURCE_LANGS },
+    { type: 'button', key: 'swapLang', label: '⇄' },
+    { type: 'select', key: KEY_TARGET_LANG, label: '目标语言', value: currentTargetLang(), options: TARGET_LANGS },
+  ];
 }
 
 // ================= 插件定义（宿主按扩展点路由调用） =================
@@ -76,7 +109,7 @@ const plugin = definePlugin({
           label: '翻译模板',
           type: 'textarea',
           defaultValue: DEFAULTS.prompt,
-          helpText: '翻译 prompt 模板，{context} 替换为待翻译文本，{targetLang} 替换为目标语言',
+          helpText: '翻译 prompt 模板：{context} 待翻译文本，{targetLang} 目标语言，{sourceLang} 源语言（面板选择，自动检测或指定）',
         },
       ];
     },
@@ -85,17 +118,41 @@ const plugin = definePlugin({
   panel: {
     state(input: XimePanelInput): XimePanelState {
       return {
-        inputText: input.inputText,
+        // 明确要求空输入框（契约：空串 = 拒绝宿主上下文/剪贴板预填），翻译内容由用户输入
+        inputText: '',
         items: buildItems(),
         loading: generating,
+        ui: buildControlsUi(),
       };
     },
 
     onInput(input: XimePanelInputEvent): void {
-      lastContext = input.value || '';
+      if (input.key === '') {
+        // 主输入框
+        lastContext = input.value || '';
+        return;
+      }
+      if (input.key === KEY_SOURCE_LANG && input.value) {
+        host.config.set(KEY_SOURCE_LANG, input.value);
+        return;
+      }
+      if (input.key === KEY_TARGET_LANG && input.value) {
+        host.config.set(KEY_TARGET_LANG, input.value);
+        return;
+      }
     },
 
     async onAction(input: XimePanelActionEvent): Promise<void> {
+      if (input.actionId === 'swapLang') {
+        // 互换源/目标语言后由宿主重拉 state 刷新选择行；
+        // 原源语言为自动检测时没有可交换的目标方向，保持目标语言不变
+        const src = currentSourceLang();
+        host.config.set(KEY_SOURCE_LANG, currentTargetLang());
+        if (src !== DEFAULTS.sourceLang) {
+          host.config.set(KEY_TARGET_LANG, src);
+        }
+        return;
+      }
       if (input.actionId !== 'generate') return;
       const context = lastContext;
       if (context === '') {
@@ -116,15 +173,17 @@ const plugin = definePlugin({
       let baseUrl = host.config.get(KEY_BASE_URL) || DEFAULTS.baseUrl;
       baseUrl = baseUrl.replace(/\/+$/, '');
       const model = host.config.get(KEY_MODEL) || DEFAULTS.model;
-      const targetLang = host.config.get(KEY_TARGET_LANG) || DEFAULTS.targetLang;
+      const sourceLang = currentSourceLang();
+      const targetLang = currentTargetLang();
       let prompt = (host.config.get(KEY_PROMPT) || DEFAULTS.prompt).split('{context}').join(context);
       prompt = prompt.split('{targetLang}').join(targetLang);
+      prompt = prompt.split('{sourceLang}').join(sourceLang);
 
       // 请求体必须是 Uint8Array（宿主 bytes() 只认字节，JS 字符串会变 null）
       const body = new TextEncoder().encode(JSON.stringify({
         model: model,
         messages: [
-          { role: 'system', content: '你是专业翻译，只输出译文。' },
+          { role: 'system', content: '你是高质量翻译引擎，只输出译文本身，不输出任何其他内容。' },
           { role: 'user', content: prompt },
         ],
         temperature: 0.3,

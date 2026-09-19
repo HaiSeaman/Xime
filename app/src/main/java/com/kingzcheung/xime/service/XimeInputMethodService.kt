@@ -145,7 +145,17 @@ object QuickSendFormCodeEditTextHolder {
 
 /** 通用工具面板输入框 holder（与快捷发送独立，避免互相覆盖）。 */
 object ToolPanelEditTextHolder {
+    /** 当前聚焦的输入框（软/硬按键路由目标；主输入框与控件行字段共用，谁聚焦指向谁）。 */
     var editText: android.widget.EditText? = null
+
+    /** 主输入框（预填与生成取词的锚点；控件行字段聚焦时与 editText 不同）。 */
+    var main: android.widget.EditText? = null
+
+    /** 用户是否手动编辑过主输入框：true 后宿主不再回填 prefill（防覆盖用户正在输入的内容）。 */
+    var userEdited: Boolean = false
+
+    /** 宿主程序化写入输入框期间的抑制标志：写入不标记 userEdited。 */
+    var applyingProgrammatically: Boolean = false
 }
 
 /**
@@ -164,6 +174,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         private const val HARDWARE_CANDIDATE_BAR_HEIGHT = 72
         internal const val SAFE_TEXT_LIMIT = 262144
 
+        /** 面板 loading 延迟显示阈值：此时间内完成的动作不显示进度条（面板高度也不变，防闪烁）。 */
+        private const val TOOL_PANEL_LOADING_SHOW_DELAY_MS = 250L
     }
 
     /** release 构建不输出调试日志，减少 logcat 写入开销。 */
@@ -844,6 +856,24 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     /** 面板生成轮询任务（流式生成期间持续刷新候选）。 */
     private var toolPanelPollJob: Job? = null
 
+    /** 面板 loading 延迟显示任务：快速动作（互换语言等）不闪进度条、面板高度不跳动。 */
+    private var toolPanelLoadingJob: Job? = null
+
+    /**
+     * 延迟显示面板 loading 指示（标题栏小圈）：阈值内完成的快速动作（本地互换、快速插件）
+     * 全程不显示，避免指示器闪烁；慢动作（网络类 onAction / 生成）超时后照常反馈。
+     * 面板重开（epoch 递增）后过期自动作废。
+     */
+    private fun scheduleToolPanelLoading(epoch: Long) {
+        toolPanelLoadingJob?.cancel()
+        toolPanelLoadingJob = serviceScope.launch {
+            delay(TOOL_PANEL_LOADING_SHOW_DELAY_MS)
+            if (uiState.value.toolPanelRequestEpoch == epoch && uiState.value.toolPanelVisible) {
+                uiState.value = uiState.value.copy(toolPanelLoading = true)
+            }
+        }
+    }
+
     /**
      * 插件工具栏按钮 action=open_panel 的宿主入口：打开该插件的通用面板。
      * 记录选区、按优先级收集上下文预填、向插件取初始面板状态并渲染。
@@ -888,6 +918,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             )
         }
         toolPanelSelection = readCurrentSelection()
+        // 每次打开都是新会话：清空用户编辑标记，允许宿主回填一次 prefill
+        ToolPanelEditTextHolder.userEdited = false
         val contextText = collectToolPanelContext()
         val pluginName = ExtensionManager.getAllInstalledPlugins()
             .firstOrNull { it.id == pluginId }?.name ?: pluginId
@@ -903,33 +935,31 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             toolPanelItems = emptyList(),
             toolPanelDisplay = display?.name,
             toolPanelUiNodes = null,
-            toolPanelLoading = true,
+            toolPanelLoading = false,
             toolPanelRequestEpoch = epoch,
             enterKeyText = if (display == ToolResult.PASSIVE) "发送" else "生成",
         )
+        scheduleToolPanelLoading(epoch)
         serviceScope.launch(Dispatchers.IO) {
             // runCatching：插件异常（超时/中毒/网络失败）时不卡 loading，面板恢复可交互
             val state = runCatching {
                 (ExtensionManager.getPluginById(pluginId) as? ToolPlugin)
                     ?.getPanelState(contextText)
             }.getOrNull()
-            val prefill = state?.inputText?.takeIf { it.isNotBlank() } ?: contextText
+            // inputText 契约：插件未返回 = 沿用上下文（适配器已解析）；
+            // 返回空串 = 插件明确要求空输入框（如翻译插件拒绝剪贴板预填）
+            val prefill = state?.inputText ?: contextText
             withContext(Dispatchers.Main) {
                 if (uiState.value.toolPanelRequestEpoch != epoch || !uiState.value.toolPanelVisible) {
                     return@withContext
                 }
+                toolPanelLoadingJob?.cancel()
                 uiState.value = uiState.value.copy(
                     toolPanelPrefillText = prefill,
                     toolPanelItems = state?.items ?: emptyList(),
                     toolPanelUiNodes = state?.ui,
                     toolPanelLoading = false,
                 )
-                if (display != ToolResult.PASSIVE) {
-                    ToolPanelEditTextHolder.editText?.let { et ->
-                        et.setText(prefill)
-                        et.setSelection(prefill.length)
-                    }
-                }
             }
         }
         if (display == ToolResult.PASSIVE) {
@@ -939,21 +969,27 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     }
 
     /**
-     * passive 纯展示面板的 action 点击：通知插件（onPanelAction）后单次重拉
+     * 面板 action（InfoPanel 按钮 / direct 控件行按钮，如互换语言）：通知插件后单次重拉
      * getPanelState 刷新 ui 节点（action 改变数据后面板立即反映）。
      * 先置 loading 再执行：同步生成（插件 onPanelAction 阻塞返回）期间面板显示加载态。
+     * 上下文与打开面板/生成时同口径（最近一次 prefill），避免 ai-reply 这类
+     * "inputText 变化即重置缓存"的插件在按钮动作后被空上下文清状态。
      */
     internal fun dispatchToolPanelAction(actionId: String) {
         val pluginId = uiState.value.toolPanelPluginId
         val epoch = uiState.value.toolPanelRequestEpoch
-        uiState.value = uiState.value.copy(toolPanelLoading = true)
+        val contextText = uiState.value.toolPanelPrefillText
+        // 延迟显示 loading：本地快动作（如互换语言）不闪指示器
+        scheduleToolPanelLoading(epoch)
         serviceScope.launch(Dispatchers.IO) {
             val plugin = ExtensionManager.getPluginById(pluginId) as? ToolPlugin ?: return@launch
-            // runCatching：插件异常（Lua 超时/中毒）时不卡 loading，面板恢复可交互
+            // runCatching：插件异常（超时/中毒）时不卡 loading，面板恢复可交互
             val state = runCatching {
+                plugin.onPanelInput("", contextText)
                 plugin.onPanelAction(actionId)
-                plugin.getPanelState("")
+                plugin.getPanelState(contextText)
             }.getOrNull()
+            toolPanelLoadingJob?.cancel()
             withContext(Dispatchers.Main) {
                 if (uiState.value.toolPanelRequestEpoch == epoch && uiState.value.toolPanelVisible) {
                     uiState.value = uiState.value.copy(
@@ -962,6 +998,19 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                         toolPanelLoading = state?.loading ?: false,
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * 控件行字段变更（文本输入/下拉选择）：实时通知插件（key = ui 节点 key）。
+     * 插件自行保存状态，宿主不代存；UI 同步返回，插件侧由 JsScriptRuntime 全量捕获异常。
+     */
+    internal fun onToolPanelFieldInput(key: String, value: String) {
+        val pluginId = uiState.value.toolPanelPluginId
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching {
+                (ExtensionManager.getPluginById(pluginId) as? ToolPlugin)?.onPanelInput(key, value)
             }
         }
     }
@@ -988,6 +1037,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             enterKeyText = "发送",
         )
         ToolPanelEditTextHolder.editText = null
+        ToolPanelEditTextHolder.main = null
+        ToolPanelEditTextHolder.userEdited = false
+        toolPanelLoadingJob?.cancel()
     }
 
     /**
@@ -1028,7 +1080,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         if (!com.kingzcheung.xime.plugin.PluginNetworkAuthHelper.ensureAuthorized(this, pluginId)) {
             return
         }
-        val inputText = ToolPanelEditTextHolder.editText?.text?.toString() ?: ""
+        // 生成取词固定读主输入框（控件行字段聚焦时按键路由指向字段本身，不影响生成上下文）
+        val inputText = ToolPanelEditTextHolder.main?.text?.toString() ?: ""
         // 捕获当前代际号（openToolPanel 时递增）。轮询期间持续对比：
         // 面板被重新打开（epoch 递增）即视为过期，丢弃本轮结果。
         val epoch = uiState.value.toolPanelRequestEpoch
@@ -1036,7 +1089,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         toolPanelPollJob?.cancel()
         toolPanelPollJob = serviceScope.launch(Dispatchers.IO) {
             val plugin = ExtensionManager.getPluginById(pluginId) as? ToolPlugin
-            plugin?.onPanelInput(inputText)
+            plugin?.onPanelInput("", inputText)
             plugin?.onPanelAction("generate")
             while (uiState.value.toolPanelVisible) {
                 val state = plugin?.getPanelState(inputText) ?: break
@@ -1044,6 +1097,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 val loading = state.loading
                 withContext(Dispatchers.Main) {
                     if (uiState.value.toolPanelRequestEpoch == epoch) {
+                        // 轮询接管 loading（插件报告），取消尚未触发的延迟显示
+                        toolPanelLoadingJob?.cancel()
                         uiState.value = uiState.value.copy(
                             toolPanelItems = items,
                             toolPanelLoading = loading,
@@ -1287,12 +1342,17 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 // 不参与计算，否则 Overlay 页面会带上表单/工具面板的额外高度（容器整体被撑高）。
                 val isOverlayPage = page is com.kingzcheung.xime.keyboard.KeyboardPage.Overlay
                 val quickSendFormExtra = if (state.showQuickSendForm && !isOverlayPage) 200 else 0
-                // 需与 ToolPanel.TOOL_PANEL_HEIGHT(170) 保持一致，否则容器比面板多/少一截，键盘被拉高。
+                // 需与 ToolPanel 渲染高度一致（toolPanelHeightDp：内容自适应 + 上限），
+                // 否则容器比面板多/少一截，键盘被拉高。
                 // PASSIVE 纯展示面板走 Overlay 全屏覆盖（键盘窗口内容区），不撑高。
                 val toolPanelExtra = if (state.toolPanelVisible &&
                     state.toolPanelDisplay != "PASSIVE" &&
                     !isOverlayPage
-                ) 170 else 0
+                ) {
+                    com.kingzcheung.xime.ui.keyboard.toolPanelHeightDp(
+                        hasControls = !state.toolPanelUiNodes.isNullOrEmpty(),
+                    )
+                } else 0
                 val overlayPanelExtra = quickSendFormExtra + toolPanelExtra
 
                 XimeTheme(darkTheme = isDarkTheme, themeId = state.themeId) {

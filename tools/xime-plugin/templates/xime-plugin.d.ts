@@ -207,9 +207,9 @@ interface XimePanelInput {
   inputText: string;
 }
 
-/** 面板交互输入事件（ui 树内 input/textarea 节点的用户输入）。 */
+/** 面板交互输入事件（direct 面板：key 为空串 = 主输入框，其余为 ui 控件行节点 key；passive 面板：ui 树内 input/textarea 节点 key）。 */
 interface XimePanelInputEvent {
-  /** 节点 key（ui 树中声明的 key） */
+  /** 节点 key（主输入框为空串 ""；ui 树中声明的 key） */
   key: string;
   value: string;
 }
@@ -243,9 +243,23 @@ interface XimePanelExtension {
 
 /** 工具面板状态。 */
 interface XimePanelState {
+  /**
+   * 面板输入框内容回显。缺省（不返回该字段）= 沿用宿主传入的上下文；
+   * 返回空串 = 明确要求空输入框（如翻译插件拒绝剪贴板预填，无需零宽字符 hack）。
+   */
   inputText?: string;
   /** 候选条目（形状不符的元素由宿主丢弃并记协议日志，不拖垮宿主） */
   items: XimePanelItem[];
+  /**
+   * 声明式控件/展示节点树。display: passive 在 InfoPanel 渲染展示型白名单；
+   * display: direct 在输入框下方渲染控件行，v1 白名单：
+   * text（带 key=可输入框，value 为初始内容，用户编辑后以用户输入为准）/
+   * select（options 静态声明，value 为当前值；options 支持 "label|value" 约定，
+   * 显示 label、回传 value；按钮动作重拉后以插件回传 value 为准）/
+   * button（key 即 actionId，点击后宿主重拉 state 刷新 ui）/
+   * section / divider；其余类型 direct 面板忽略。
+   * 语言选择等偏好建议用 host.config 持久化，下次打开面板自动恢复。
+   */
   ui?: XimeUiNode[];
   loading?: boolean;
 }

@@ -25,7 +25,7 @@ package com.kingzcheung.xime.plugin.core.js.sdk
  * ## 宿主调用路径（扩展点方法）
  * - settings.schema() / settings.options(key)
  * - transform.candidates(req)
- * - panel.state({inputText}) / panel.onInput({key,value}) /
+ * - panel.state({inputText}) / panel.onInput({key,value}，key 为空串 = 主输入框，其余为 ui 节点 key) /
  *   panel.onAction({actionId}) / panel.onItemClick({itemId})
  * - emoji.listCategories() / emoji.query(q) / emoji.icon()
  * - speech.configure(options) / speech.feed(chunk) / speech.start() /

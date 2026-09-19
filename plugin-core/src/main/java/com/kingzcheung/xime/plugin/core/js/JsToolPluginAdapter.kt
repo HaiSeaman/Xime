@@ -22,9 +22,10 @@ class JsToolPluginAdapter(
         val map = JsScriptRuntime.jsToKotlin(result) as? Map<*, *>
         if (map == null) {
             protocolWarn("getPanelState 必须返回对象（当前为 ${result?.javaClass?.simpleName ?: "null"}），已按空状态处理")
-            return ToolPanelState()
+            return ToolPanelState(inputText = inputText)
         }
-        val input = map["inputText"]?.toString()?.takeIf { it.isNotBlank() } ?: inputText
+        // inputText 契约：缺省（未返回/非字符串）= 沿用宿主上下文；空串 = 明确要求空输入框
+        val input = (map["inputText"] as? String) ?: inputText
         return ToolPanelState(
             inputText = input,
             items = parseResultItems(map["items"], "getPanelState.items"),
@@ -37,8 +38,8 @@ class JsToolPluginAdapter(
         return JsScriptRuntime.jsToKotlin(value) as? List<*> ?: emptyList<Any>()
     }
 
-    override fun onPanelInput(text: String) {
-        runtime.call(JsPluginContract.PATH_PANEL_ON_INPUT, mapOf("key" to "", "value" to text))
+    override fun onPanelInput(key: String, value: String) {
+        runtime.call(JsPluginContract.PATH_PANEL_ON_INPUT, mapOf("key" to key, "value" to value))
     }
 
     override fun onPanelAction(actionId: String) {
