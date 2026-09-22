@@ -46,6 +46,7 @@ object SettingsPreferences {
     const val KEY_SWIPE_UP_HINTS_ENABLED = "swipe_up_hints_enabled"
     const val KEY_SWIPE_DOWN_HINTS_ENABLED = "swipe_down_hints_enabled"
     const val KEY_SHOW_PRESS_BUBBLE = "show_press_bubble"
+    const val KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED = "landscape_split_keyboard_enabled"
 
     private const val KEY_MODE_CHANGE_TARGET = "mode_change_target"
 
@@ -520,6 +521,15 @@ object SettingsPreferences {
 
     fun setShowPressBubble(context: Context, show: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_SHOW_PRESS_BUBBLE, show).apply()
+    }
+
+    /** 横屏时是否使用分体键盘，默认开启以保持现有行为。 */
+    fun isLandscapeSplitKeyboardEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED, true)
+    }
+
+    fun setLandscapeSplitKeyboardEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED, enabled).apply()
     }
     
     /** 获取方案偏好的键盘布局，默认全键盘 */
