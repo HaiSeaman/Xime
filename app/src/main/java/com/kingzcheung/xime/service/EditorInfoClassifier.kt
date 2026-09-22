@@ -88,4 +88,26 @@ internal object EditorInfoClassifier {
             cls == InputType.TYPE_CLASS_PHONE ||
             cls == InputType.TYPE_CLASS_DATETIME
     }
+
+    /**
+     * 密码类输入框：会话开始时强制英文模式（AsciiModeController.applyStartDecision 的
+     * 临时决策，不持久化）。仅密码变体；TYPE_NULL（终端）不在其列——终端场景
+     * 用户仍可能需要中文输入。
+     */
+    fun isPasswordEditor(info: EditorInfo?): Boolean {
+        if (info == null) return false
+        val inputType = info.inputType
+        if (inputType == InputType.TYPE_NULL) return false
+        val cls = inputType and InputType.TYPE_MASK_CLASS
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
+        if (cls == InputType.TYPE_CLASS_TEXT) {
+            return variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+        }
+        if (cls == InputType.TYPE_CLASS_NUMBER) {
+            return variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        return false
+    }
 }
