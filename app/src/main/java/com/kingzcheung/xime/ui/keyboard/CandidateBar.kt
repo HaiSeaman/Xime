@@ -44,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -380,24 +381,31 @@ fun CandidateBar(
             }
 
             if (inlineSuggestions.isNotEmpty()) {
-                inlineSuggestions.forEachIndexed { index, suggestion ->
-                    InlineSuggestionView(
-                        suggestion = suggestion,
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(180.dp),
-                    )
-                    if (index < inlineSuggestions.lastIndex) {
-                        InlineSuggestionDivider(color = visuals.dividerColor)
+                LazyRow(
+                    // 占满配额：内容少时建议靠左、右侧留白到收起按钮（收起按钮
+                    // 因此固定最右）；内容超出配额时占满并可横向滑动查看后续建议；
+                    // clipToBounds：滑动时滑出边界的建议裁剪掉，避免与左侧 logo 重叠
+                    modifier = Modifier
+                        .weight(1f)
+                        .clipToBounds(),
+                ) {
+                    itemsIndexed(inlineSuggestions, key = { index, _ -> index }) { _, suggestion ->
+                        Box(modifier = Modifier.fillMaxHeight()) {
+                            InlineSuggestionView(
+                                suggestion = suggestion,
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(180.dp),
+                            )
+                            // 每条尾部 1dp 分隔线：条目之间为间隔，最后一条的尾线
+                            // 同时充当与候选词区的分界（与旧平铺布局视觉一致）
+                            InlineSuggestionDivider(
+                                modifier = Modifier.align(Alignment.CenterEnd),
+                                color = visuals.dividerColor,
+                            )
+                        }
                     }
                 }
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .padding(vertical = 6.dp)
-                        .background(visuals.dividerColor),
-                )
             }
 
             LazyRow(
@@ -468,33 +476,37 @@ fun CandidateBar(
 
             when {
                 state is CandidateBarState.Idle -> {
-                    Row(
-                        modifier = Modifier
-                            .weight(1f, fill = true)
-                            .horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        if (toolbarActions.isNotEmpty()) {
-                            toolbarActions.forEach { action ->
-                                val interactionSource = remember { MutableInteractionSource() }
-                                val isPressed by interactionSource.collectIsPressedAsState()
-                                Box(
-                                    modifier = Modifier
-                                        .padding(horizontal = 5.dp)
-                                        .size(32.dp)
-                                        .clickable(
-                                            interactionSource = interactionSource,
-                                            indication = null,
-                                            onClick = action.onClick
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    ToolbarButtonIcon(
-                                        item = action.item,
-                                        tint = if (isPressed) iconButtonTint.copy(alpha = 0.6f) else iconButtonTint,
-                                        modifier = Modifier.size(22.dp),
-                                    )
+                    // 显示内联建议时隐藏工具栏按钮区，把宽度让给建议；logo 与
+                    // 收起按钮保留，退格回到 idle 时的状态感知不变
+                    if (inlineSuggestions.isEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f, fill = true)
+                                .horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            if (toolbarActions.isNotEmpty()) {
+                                toolbarActions.forEach { action ->
+                                    val interactionSource = remember { MutableInteractionSource() }
+                                    val isPressed by interactionSource.collectIsPressedAsState()
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(horizontal = 5.dp)
+                                            .size(32.dp)
+                                            .clickable(
+                                                interactionSource = interactionSource,
+                                                indication = null,
+                                                onClick = action.onClick
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        ToolbarButtonIcon(
+                                            item = action.item,
+                                            tint = if (isPressed) iconButtonTint.copy(alpha = 0.6f) else iconButtonTint,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    }
                                 }
                             }
                         }

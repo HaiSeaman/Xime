@@ -172,7 +172,9 @@ fun KeyboardView(
         val target = viewModel.asciiStateMachine.targetFor(curContext, state.isAsciiMode)
         if (target != null) {
             FileLogger.i("XimeKeyboard", "ascii sync: ${prevContext.name}(${state.isAsciiMode}) -> ${curContext.name}($target)")
-            callbacks.onKeyPress("ime_switch", false)
+            // 面板上下文同步走 ime_switch_panel（PANEL_SYNC）：切引擎但不写 user.yaml，
+            // 临时态不污染用户显式中英选择
+            callbacks.onKeyPress("ime_switch_panel", false)
         }
     }
 

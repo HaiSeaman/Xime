@@ -7,6 +7,7 @@ import com.kingzcheung.xime.rime.buildT9DisplayState
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.ui.keyboard.isT9Schema
+import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
 import com.kingzcheung.xime.util.FileLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -293,12 +294,17 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
             val engineSchemaId = service.rimeEngine.getCurrentSchema()
             // session 未就绪时 getCurrentSchema() 返回空串：用持久化方案兜底，
             // 避免空值覆盖已正确的 currentSchemaId/schemaName 导致键盘退化为全键盘
-            val currentSchemaId = if (isHandwritingMode) {
-                HANDWRITING_SCHEMA_ID
-            } else if (engineSchemaId.isNotEmpty()) {
-                engineSchemaId
-            } else {
-                SettingsPreferences.getCurrentSchema(context)
+            val currentSchemaId = when {
+                // 引擎已切到非手写方案时以引擎为准：键盘若仍停留手写页（部署期间
+                // fallback 的残留），钉死 handwriting 会让 UI 与引擎永久脱节，
+                // 表现为选完方案后键盘卡在手写页
+                engineSchemaId.isNotEmpty() && !isHandwritingSchema(engineSchemaId) -> engineSchemaId
+                // 手写页在态时报告当前持久化的手写方案 id（内置为 handwriting，
+                // 第三方手写方案报告其自身 id，方案名/图标显示才正确）
+                isHandwritingMode -> SettingsPreferences.getCurrentSchema(context)
+                    .takeIf { isHandwritingSchema(it) } ?: HANDWRITING_SCHEMA_ID
+                engineSchemaId.isNotEmpty() -> engineSchemaId
+                else -> SettingsPreferences.getCurrentSchema(context)
             }
             val name = SchemaManager.getSchemaDisplayName(context, currentSchemaId)
 
@@ -367,7 +373,8 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
     internal fun toggleSchemaSwitch(sw: com.kingzcheung.xime.viewmodel.SchemaSwitchUiState) {
         service.serviceScope.launch(service.keyProcessingDispatcher) {
             if (sw.name == "ascii_mode") {
-                service.schemaController.switchInputMethod()
+                // 菜单中西切换 = 用户显式操作（USER_TOGGLE，会话级，不持久化）
+                service.asciiModeController.switchAscii(AsciiModeController.Reason.USER_TOGGLE)
             } else if (sw.name.isNotEmpty()) {
                 val newValue = !service.rimeEngine.getOption(sw.name)
                 service.rimeEngine.setOption(sw.name, newValue)
@@ -392,15 +399,17 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
         }
     }
 
-    /** 从 librime user.yaml 恢复方案选项（中/西、简/繁等），在切换方案后调用。 */
+    /** 从 librime user.yaml 恢复方案选项（简/繁等），在切换方案后调用。
+     *  ascii_mode 不在此恢复：由 AsciiModeController.applyStartDecision 按编辑框
+     *  类型与用户显式选择决策，避免通用恢复盖过会话级决策。 */
     internal fun restorePersistedSchemaOptions() {
         if (!RimeEngine.isInitialized()) return
         val schemaId = service.rimeEngine.getCurrentSchema()
         if (schemaId.isEmpty()) return
-        val rimeAsciiBefore = service.rimeEngine.isAsciiMode()
         val defs = SchemaManager.getSchemaSwitches(service, schemaId)
         for (def in defs) {
             if (def.name.isNotEmpty()) {
+                if (def.name == "ascii_mode") continue
                 service.rimeEngine.setOption(def.name, service.rimeEngine.getUserConfigBool("var/option/${def.name}"))
             } else if (def.options.isNotEmpty()) {
                 val activeIndex = def.options.indexOfFirst { service.rimeEngine.getUserConfigBool("var/option/$it") }
@@ -408,10 +417,6 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
                     def.options.forEachIndexed { i, opt -> service.rimeEngine.setOption(opt, i == activeIndex) }
                 }
             }
-        }
-        val rimeAsciiAfter = service.rimeEngine.isAsciiMode()
-        if (rimeAsciiBefore != rimeAsciiAfter) {
-            FileLogger.i(XimeInputMethodService.TAG, "restorePersistedSchemaOptions: ascii $rimeAsciiBefore -> $rimeAsciiAfter (ui=${service.uiState.value.isAsciiMode})")
         }
     }
 

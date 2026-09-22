@@ -7,7 +7,7 @@ import android.view.KeyEvent
 import android.view.inputmethod.InputConnection
 import android.widget.Toast
 import com.kingzcheung.xime.MainActivity
-import com.kingzcheung.xime.keyboard.HANDWRITING_SCHEMA_ID
+import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
 import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManager
@@ -25,64 +25,11 @@ import kotlinx.coroutines.withContext
  * 方案管理与输入模式切换。
  *
  * 承载方案切换（switchSchema/applyPageSizeSetting）、部署（reloadConfig/deploy/deploySchema/downloadSchema）、
- * 中英切换（switchInputMethod）、工具栏编辑动作、键盘高度与浮动模式调整。
+ * 工具栏编辑动作、键盘高度与浮动模式调整。
+ * 中英切换已收敛至 [AsciiModeController]。
  * 共享状态通过 service 引用访问。
  */
 internal class ImeSchemaController(private val service: XimeInputMethodService) {
-    internal suspend fun switchInputMethod(): Boolean {
-        val candState = service.candidateState.value
-        val pendingEnglish = candState.pendingEnglishText
-        FileLogger.i(XimeInputMethodService.TAG, "switchInputMethod: start, pendingEnglish='${if (pendingEnglish.isEmpty()) '-' else pendingEnglish}', isComposing=${candState.isComposing}, candidates=${candState.candidates.size}")
-        if (pendingEnglish.isNotEmpty()) {
-            // 英文直接上屏模式：编码字符已逐字落盘，切模式只需结束本轮输入（清状态），
-            // 不可再 commitText 否则会重复输出整个词。
-            withContext(Dispatchers.Main) {
-                service.candidateState.value = service.candidateState.value.copy(
-                    pendingEnglishText = "",
-                    associationCandidates = emptyList()
-                )
-            }
-        } else if (candState.isComposing) {
-            if (candState.candidates.isNotEmpty()) {
-                service.keyRouter.selectCandidateAsync(0)
-            } else {
-                val input = candState.inputText
-                if (input.isNotEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        service.commitText(input)
-                    }
-                    service.rimeEngine.clearComposition()
-                }
-            }
-        }
-        // 由 ImeKeyRouter 在 key-processing 线程调用：toggleAsciiMode 阻塞等待 rimeLock
-        // （部署/维护持锁时排队，完成后自动切换），不静默失败、不阻塞主线程。
-        // 仅在 session 创建失败（引擎真正不可用）时返回 false。
-        val t0 = System.nanoTime()
-        if (!service.rimeEngine.toggleAsciiMode()) {
-            FileLogger.e(XimeInputMethodService.TAG, "switchInputMethod: toggleAsciiMode FAILED (engine unavailable)")
-            Toast.makeText(service, "输入法引擎不可用，请稍后再试", Toast.LENGTH_SHORT).show()
-            return false
-        }
-        FileLogger.i(XimeInputMethodService.TAG, "switchInputMethod: toggleAsciiMode ok, took ${(System.nanoTime() - t0) / 1_000_000}ms, rime ascii=${service.rimeEngine.isAsciiMode()}, thread=${Thread.currentThread().name}")
-        service.sessionController.persistSchemaOption("ascii_mode", service.rimeEngine.isAsciiMode())
-        withContext(Dispatchers.Main) {
-            // 显式同步 uiState.isAsciiMode（权威源 = rime 引擎状态），
-            // 不依赖 updateUI 链路异步回写，避免键盘 UI 与 rime 状态脱钩。
-            val ascii = service.rimeEngine.isAsciiMode()
-            FileLogger.i(XimeInputMethodService.TAG, "switchInputMethod: rime ascii=$ascii, ui before=${service.uiState.value.isAsciiMode}")
-            service.uiState.value = service.uiState.value.copy(isAsciiMode = ascii)
-            service.updateUI()
-            // 主线程直接权威下发键盘布局切换（与 rime 状态一致），
-            // 不依赖 Compose LaunchedEffect 侦测 uiState 后再异步 dispatch（部分机型调度延迟导致 UI 不更新）。
-            val schemaId = service.rimeEngine.getCurrentSchema()
-            service.keyboardViewModel.dispatch(
-                com.kingzcheung.xime.ui.keyboard.KeyboardDispatchAction.AsciiModeChanged(ascii, schemaId)
-            )
-        }
-        return true
-    }
-    
     internal fun reloadConfig() {
         
         service.mainHandler.post {
@@ -268,7 +215,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
     }
 
     internal fun switchSchema(schemaId: String) {
-        if (schemaId == HANDWRITING_SCHEMA_ID) {
+        if (isHandwritingSchema(schemaId)) {
             // 检查手写模型文件是否已下载
             if (!com.kingzcheung.xime.handwriting.HandwritingEngine.hasModel(service)) {
                 FileLogger.w(XimeInputMethodService.TAG, "Handwriting model not found, redirecting to download")

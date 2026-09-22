@@ -4,6 +4,7 @@ import android.content.Context
 import com.charleskorn.kaml.YamlList
 import com.charleskorn.kaml.YamlMap
 import com.charleskorn.kaml.YamlScalar
+import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 
@@ -160,8 +161,8 @@ object PersonalDictManager {
     private suspend fun ensureSchemaPackInner(rimeDir: java.io.File, context: Context, schemaId: String) {
         val schemaFile = java.io.File(rimeDir, "${schemaId}.schema.yaml")
         if (!schemaFile.exists()) return
-        // handwriting 手写识别方案不经过 librime 词典输入，跳过补丁。
-        if (schemaId == "handwriting") return
+        // 手写方案（schemas 绑定声明）不经过 librime 词典输入，跳过补丁。
+        if (isHandwritingSchema(schemaId)) return
         // 个人词库合并规则已移除：清理旧版本写入的 merged 词典引用，
         // 让 librime 按 schema 原声明编译原始词典名（如 pinyin_simp.table.bin），
         // 恢复 wubi86_pinyin 等方案的 reverse_lookup 拼音反查。

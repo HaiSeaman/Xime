@@ -623,11 +623,22 @@ object KeysConfigHelper {
     private var _zhRowsBase: List<List<String>> = DEFAULT_ZH_ROWS
     private var _keyGestureConfigZhBase: Map<String, KeyGestureConfig> = emptyMap()
 
-    // 合并键布局缓存：section（qwerty_14/17/18）→ 行布局 / 手势配置
+    // 合并键布局缓存：section（qwerty_14/17/18 及 custom 新增）→ 行布局 / 手势配置
     private var _mergedRows: Map<String, List<List<String>>> = emptyMap()
     private var _mergedGestureConfigs: Map<String, Map<String, KeyGestureConfig>> = emptyMap()
     private var _activeMergedSection: String? = null
     private var _activeSchemaId: String = ""
+
+    // 合并键绑定缓存：schemaId → 键盘 section（xime.yaml keyboard.<section>.schemas 声明）
+    private var _schemaSectionBindings: Map<String, String> = emptyMap()
+
+    /**
+     * 代码布局 section：由专属组件渲染（T9KeyboardLayout / StrokeKeyboardLayout /
+     * HandwritingKeyboardLayout），无 layout.rows。schemas 绑定到这些 section 的方案
+     * 走 [codeLayoutForSchema] 查询，不进入合并键行布局缓存
+     * （[mergedSectionForSchema] 对其返回 null）。
+     */
+    internal val CODE_LAYOUT_SECTIONS = setOf("t9", "stroke", "handwriting")
 
     // 九键/笔画手势配置缓存（keyboard.t9.keys / keyboard.stroke.keys，custom 键级覆盖）。
     // 键 id 不做大小写归一：九键为数字字符串 "1"~"9"，笔画为键面标签（一/丨/丿/丶/乛 等）。
@@ -635,12 +646,23 @@ object KeysConfigHelper {
     private var _strokeGestureConfigs: Map<String, KeyGestureConfig> = emptyMap()
 
     /** 合并键方案（pinyin_14jian 等）对应的 xime.yaml 键盘 section，非合并键方案返回 null。 */
-    internal fun mergedSectionForSchema(schemaId: String): String? = when {
-        schemaId.contains("14jian") -> "qwerty_14"
-        schemaId.contains("17jian") -> "qwerty_17"
-        schemaId.contains("18jian") -> "qwerty_18"
-        else -> null
-    }
+    internal fun mergedSectionForSchema(schemaId: String): String? =
+        resolveMergedSection(schemaId, _schemaSectionBindings)
+
+    /**
+     * 绑定解析：仅认 schemas 声明（xime.yaml / xime.custom.yaml keyboard.<section>.schemas），
+     * 未声明的方案一律全键盘（26 键），不做 id 关键字猜测。
+     * 代码布局 section（t9/stroke）不是行数据布局，不作为合并键解析结果。
+     */
+    internal fun resolveMergedSection(schemaId: String, bindings: Map<String, String>): String? =
+        bindings[schemaId]?.takeIf { it !in CODE_LAYOUT_SECTIONS }
+
+    /** 查询方案声明的键盘 section（任意类型，含代码布局），未声明返回 null。 */
+    fun boundSectionForSchema(schemaId: String): String? = _schemaSectionBindings[schemaId]
+
+    /** 查询方案绑定的代码布局 section（t9 九键 / stroke 笔画），未绑定返回 null。 */
+    fun codeLayoutForSchema(schemaId: String): String? =
+        _schemaSectionBindings[schemaId]?.takeIf { it in CODE_LAYOUT_SECTIONS }
 
     /**
      * 按当前方案切换中文行布局与手势缓存（合并键布局 ↔ 标准 26 键）。
@@ -709,10 +731,17 @@ object KeysConfigHelper {
             val parsedRows = parseKeyboardLayoutFromAssets(context)
             _zhRowsBase = parsedRows.first
             _enRows = parsedRows.second
-            // 合并键布局 sections（qwerty_14 / qwerty_17 / qwerty_18）
+            // 合并键绑定（keyboard.<section>.schemas，custom 覆盖 builtIn 同名方案的绑定）
+            val builtInBindings = readAssetText(context, XIME_CONFIG_FILE)
+                ?.let { parseSchemaBindingsYamlText(it) } ?: emptyMap()
+            val customBindings = readCustomText(context)
+                ?.let { parseSchemaBindingsYamlText(it) } ?: emptyMap()
+            _schemaSectionBindings = builtInBindings + customBindings
+            // 合并键布局 sections：由 schemas 绑定动态发现（内置 qwerty_14/17/18 + custom 新增）；
+            // 代码布局 section（t9/stroke）无行数据，走各自的专属配置解析，不在此加载
             val mergedRowsMap = mutableMapOf<String, List<List<String>>>()
             val mergedGesturesMap = mutableMapOf<String, Map<String, KeyGestureConfig>>()
-            for (section in MERGED_LAYOUT_SECTIONS) {
+            for (section in _schemaSectionBindings.values.filter { it !in CODE_LAYOUT_SECTIONS }.distinct()) {
                 parseLayoutSection(context, section)?.let { mergedRowsMap[section] = it }
                 mergedGesturesMap[section] = parseGesturesSection(context, section)
             }
@@ -1171,9 +1200,6 @@ object KeysConfigHelper {
         )
     }
 
-    /** 合并键布局的 xime.yaml section 名。 */
-    private val MERGED_LAYOUT_SECTIONS = listOf("qwerty_14", "qwerty_17", "qwerty_18")
-
     /** 从 xime.yaml + xime.custom.yaml 合并解析指定 section 的键盘行布局（custom 整段覆盖 built-in）。 */
     private fun parseLayoutSection(context: Context, section: String): List<List<String>>? {
         val defaultText = readAssetText(context, XIME_CONFIG_FILE)
@@ -1192,6 +1218,30 @@ object KeysConfigHelper {
         val custom = (userData ?: readAssetText(context, XIME_CUSTOM_CONFIG_FILE))
             ?.let { parseKeyboardYamlSection(it, section) }
         return if (custom != null) default + custom else default
+    }
+
+    /**
+     * 从 YAML 文本提取合并键绑定：keyboard.<section>.schemas 列出的每个方案 id 映射到该 section。
+     * 无 schemas 声明的 section 忽略；同一方案 id 在多个 section 声明时以后出现的为准。
+     */
+    internal fun parseSchemaBindingsYamlText(yamlText: String): Map<String, String> {
+        return try {
+            val root = yaml.parseToYamlNode(yamlText) as? YamlMap ?: return emptyMap()
+            val keyboardNode = root.opt<YamlMap>("keyboard") ?: return emptyMap()
+            val bindings = mutableMapOf<String, String>()
+            for ((kNode, vNode) in keyboardNode.entries) {
+                val section = (kNode as? YamlScalar)?.content ?: continue
+                val schemas = (vNode as? YamlMap)?.opt<YamlList>("schemas") ?: continue
+                for (item in schemas.items) {
+                    val schemaId = (item as? YamlScalar)?.content?.trim().orEmpty()
+                    if (schemaId.isNotEmpty()) bindings[schemaId] = section
+                }
+            }
+            bindings
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse schema bindings", e)
+            emptyMap()
+        }
     }
 
     /**

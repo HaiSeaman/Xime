@@ -1,6 +1,10 @@
 package com.kingzcheung.xime.settings
 
+import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
+import com.kingzcheung.xime.ui.keyboard.isStrokeSchema
+import com.kingzcheung.xime.ui.keyboard.isT9Schema
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -88,20 +92,121 @@ class KeyboardMergedLayoutTest {
     }
 
     // ── 方案 → section 映射 ──
+    // 绑定仅认 schemas 声明，代码不做 id 关键字猜测；单测环境无 Context 未加载
+    // xime.yaml，mergedSectionForSchema 恒为 null（全键盘），
+    // 声明路径由 resolveMergedSection / parseSchemaBindingsYamlText 用例覆盖。
 
     @Test
-    fun `合并键方案映射到对应 section`() {
-        assertEquals("qwerty_14", KeysConfigHelper.mergedSectionForSchema("pinyin_14jian"))
-        assertEquals("qwerty_17", KeysConfigHelper.mergedSectionForSchema("pinyin_17jian"))
-        assertEquals("qwerty_18", KeysConfigHelper.mergedSectionForSchema("pinyin_18jian"))
+    fun `已声明的方案解析到对应 section`() {
+        val bindings = mapOf(
+            "pinyin_14jian" to "qwerty_14",
+            "pinyin_17jian" to "qwerty_17",
+            "pinyin_18jian" to "qwerty_18",
+        )
+        assertEquals("qwerty_14", KeysConfigHelper.resolveMergedSection("pinyin_14jian", bindings))
+        assertEquals("qwerty_17", KeysConfigHelper.resolveMergedSection("pinyin_17jian", bindings))
+        assertEquals("qwerty_18", KeysConfigHelper.resolveMergedSection("pinyin_18jian", bindings))
     }
 
     @Test
-    fun `非合并键方案返回 null`() {
+    fun `未声明的方案一律全键盘`() {
         assertNull(KeysConfigHelper.mergedSectionForSchema("pinyin_simp"))
         assertNull(KeysConfigHelper.mergedSectionForSchema("t9_pinyin"))
         assertNull(KeysConfigHelper.mergedSectionForSchema("wubi86"))
         assertNull(KeysConfigHelper.mergedSectionForSchema(""))
+        // id 含 14jian 关键字但未声明 → 同样全键盘（代码不做关键字猜测）
+        assertNull(KeysConfigHelper.mergedSectionForSchema("wanxiang_14jian"))
+    }
+
+    // ── schemas 绑定声明 ──
+
+    @Test
+    fun `schemas 声明解析为绑定表`() {
+        val yaml = """
+            keyboard:
+              qwerty_14:
+                schemas: [pinyin_14jian, my_14jian]
+                layout:
+                  rows:
+                    - [[q, w]]
+              qwerty_20:
+                schemas:
+                  - pinyin_20jian
+              t9:
+                side_symbols: ["，"]
+        """.trimIndent()
+        val bindings = KeysConfigHelper.parseSchemaBindingsYamlText(yaml)
+        assertEquals("qwerty_14", bindings["pinyin_14jian"])
+        assertEquals("qwerty_14", bindings["my_14jian"])
+        assertEquals("qwerty_20", bindings["pinyin_20jian"])
+        assertEquals(3, bindings.size)
+    }
+
+    @Test
+    fun `无 schemas 声明的 section 不产生绑定`() {
+        val yaml = """
+            keyboard:
+              qwerty:
+                layout:
+                  rows:
+                    - [q, w]
+              t9:
+                side_symbols: ["，"]
+        """.trimIndent()
+        assertTrue(KeysConfigHelper.parseSchemaBindingsYamlText(yaml).isEmpty())
+    }
+
+    @Test
+    fun `绑定声明是唯一来源不做关键字猜测`() {
+        val bindings = mapOf("my_layout" to "qwerty_20")
+        // 已声明的方案按绑定走，即使 id 不含任何关键字
+        assertEquals("qwerty_20", KeysConfigHelper.resolveMergedSection("my_layout", bindings))
+        // 未声明 → null（全键盘），即使 id 含 14jian/t9 关键字
+        assertNull(KeysConfigHelper.resolveMergedSection("wanxiang_14jian", bindings))
+        assertNull(KeysConfigHelper.resolveMergedSection("t9_pinyin", bindings))
+    }
+
+    @Test
+    fun `九键笔画手写判断无代码硬编码`() {
+        // 单测环境未加载绑定（无 Context），任何 id（含内置 t9_pinyin/stroke/handwriting）
+        // 都不应被识别为九键/笔画/手写——识别只能来自 schemas 声明
+        assertFalse(isT9Schema("t9_pinyin"))
+        assertFalse(isT9Schema("wanxiang_t9"))
+        assertFalse(isStrokeSchema("stroke"))
+        assertFalse(isHandwritingSchema("handwriting"))
+        assertFalse(isT9Schema(""))
+    }
+
+    @Test
+    fun `内置 xime yaml 三个布局均声明 schemas 绑定`() {
+        val bindings = KeysConfigHelper.parseSchemaBindingsYamlText(ximeYamlText())
+        assertEquals("qwerty_14", bindings["pinyin_14jian"])
+        assertEquals("qwerty_17", bindings["pinyin_17jian"])
+        assertEquals("qwerty_18", bindings["pinyin_18jian"])
+    }
+
+    @Test
+    fun `t9 stroke handwriting 的绑定不进入合并键行布局`() {
+        val bindings = mapOf(
+            "t9_pinyin" to "t9",
+            "stroke" to "stroke",
+            "handwriting" to "handwriting",
+            "pinyin_14jian" to "qwerty_14",
+        )
+        assertNull(KeysConfigHelper.resolveMergedSection("t9_pinyin", bindings))
+        assertNull(KeysConfigHelper.resolveMergedSection("stroke", bindings))
+        assertNull(KeysConfigHelper.resolveMergedSection("handwriting", bindings))
+        assertEquals("qwerty_14", KeysConfigHelper.resolveMergedSection("pinyin_14jian", bindings))
+    }
+
+    @Test
+    fun `内置 xime yaml 声明 t9 stroke handwriting 绑定`() {
+        val bindings = KeysConfigHelper.parseSchemaBindingsYamlText(ximeYamlText())
+        assertEquals("t9", bindings["t9_pinyin"])
+        assertEquals("t9", bindings["t9"])
+        assertEquals("t9", bindings["wanxiang_t9"])
+        assertEquals("stroke", bindings["stroke"])
+        assertEquals("handwriting", bindings["handwriting"])
     }
 
     // ── 前端分组 ↔ Rime xlit 映射一致性 ──

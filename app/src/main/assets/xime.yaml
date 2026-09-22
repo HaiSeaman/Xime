@@ -513,12 +513,17 @@ keyboard:
   # ── 合并键布局（14/17/18 键）──
   # rows 支持子数组：[[q, w], [e, r], ...] 表示 q/w 合并在同一个键，每行键数变少键自然更宽（行内等宽）。
   # 合并键在 keys 里的 id 为组内字母拼接（qw、er...），tap 的 value 固定为组内第一个字母（代表字母），
-  # Rime 侧由 pinyin_14jian / pinyin_17jian / pinyin_18jian 方案的拼写运算靠词库消歧。
+  # Rime 侧由方案的拼写运算（derive + xlit）靠词库消歧。
   # swipe_up：前 10 个键按行序输出数字 1-0，其余键沿用 26 键同字母的符号习惯；
   # long_press 气泡保留组内字母的精确输入作为辅助。
   #
+  # schemas 声明使用此布局的方案（schema_id），前端据此在方案切换时加载对应 section，
+  # 新增合并键布局只需加 section + 声明 schemas（可写入 xime.custom.yaml），无需改代码。
+  # 一个 section 可被多个方案复用；未声明 schemas 的方案一律使用全键盘（26 键）。
+  #
   # 拼音 14 键：qw/er/ty/ui/op、as/df/gh/jk/l、zx/cv/bn/m（对应方案 pinyin_14jian）
   qwerty_14:
+    schemas: [pinyin_14jian]
     button_layout: standard
     layout:
       rows:
@@ -546,6 +551,7 @@ keyboard:
 
   # 拼音 17 键：we/rt/yu/op、sd/fg/jk、xc/bn（对应方案 pinyin_17jian）
   qwerty_17:
+    schemas: [pinyin_17jian]
     button_layout: standard
     layout:
       rows:
@@ -576,6 +582,7 @@ keyboard:
 
   # 拼音 18 键：we/rt/io、sd/fg/jk、xc/bn（对应方案 pinyin_18jian）
   qwerty_18:
+    schemas: [pinyin_18jian]
     button_layout: standard
     layout:
       rows:
@@ -608,7 +615,10 @@ keyboard:
   # 九键（T9）键盘配置
   # 注意：本键盘不支持 button_layout（按键布局模式），固定 standard 键面布局；
   # 此处配置 button_layout: compact 不生效（compact 仅 26 键 qwerty/qwerty_en 支持）。
+  # schemas 声明使用九键布局的方案，未声明的方案一律全键盘；
+  # 第三方九键方案在 xime.custom.yaml 的 t9.schemas 追加即可，无需改代码。
   t9:
+    schemas: [t9_pinyin, t9, wanxiang_t9]
     # ── 左侧快捷符号栏（空闲态显示；列表长度不限，超过 4 个时可上下滑动）──
     # 用户在 xime.custom.yaml 的同路径覆盖整个列表，未配置时使用内置默认值
     side_symbols:
@@ -641,7 +651,10 @@ keyboard:
   # 笔画键盘配置
   # 注意：本键盘不支持 button_layout（按键布局模式），固定 standard 键面布局；
   # 此处配置 button_layout: compact 不生效（compact 仅 26 键 qwerty/qwerty_en 支持）。
+  # schemas 声明使用笔画布局的方案，未声明的方案一律全键盘；
+  # 第三方笔画方案在 xime.custom.yaml 的 stroke.schemas 追加即可。
   stroke:
+    schemas: [stroke]
     # ── 左侧快捷符号列（常显；列表长度不限，超过 3 个时滚动显示）──
     # 用户在 xime.custom.yaml 的同路径覆盖整个列表，未配置时使用内置默认值
     side_symbols:
@@ -665,3 +678,11 @@ keyboard:
       "分词": { swipe_up: { value: "7", display: "key" } }
       "，": { swipe_up: { value: "8", display: "key" } }
       "英": { swipe_up: { value: "9", display: "key" } }
+
+  # 手写键盘配置
+  # schemas 声明使用手写布局的方案：手写不经过 rime 引擎（由 HandwritingEngine
+  # 识别，模型在应用内管理），切换时不调 rime switchSchema、不走个人词典。
+  # 未声明的方案一律全键盘；第三方手写方案在 xime.custom.yaml 的
+  # handwriting.schemas 追加即可，无需改代码。
+  handwriting:
+    schemas: [handwriting]

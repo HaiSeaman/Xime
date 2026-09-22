@@ -26,6 +26,7 @@ import com.kingzcheung.xime.ui.keyboard.KeyboardLayoutState
 import com.kingzcheung.xime.ui.keyboard.transition
 import com.kingzcheung.xime.ui.keyboard.KeyboardLayoutAction
 import com.kingzcheung.xime.ui.keyboard.KeyboardViewState
+import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
 import com.kingzcheung.xime.ui.keyboard.initialKeyboardLayoutState
 import com.kingzcheung.xime.util.FileLogger
 
@@ -295,7 +296,7 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
                 } else if (current is KeyboardViewState.NumberPanel || current is KeyboardViewState.CommonSymbolPanel) {
                     FileLogger.d("XimeKeyboard", "AsciiModeChanged skipped: current=$current (panel)")
                     Triple(current, _page.value, _keyboardState.value)
-                } else if (!action.isAsciiMode && action.schemaId == "handwriting") {
+                } else if (!action.isAsciiMode && isHandwritingSchema(action.schemaId)) {
                     Triple(KeyboardViewState.Handwriting, KeyboardPage.Main(MainType.HANDWRITING), KeyboardLayoutState.Chinese)
                 } else {
                     val kb = initialKeyboardLayoutState(action.isAsciiMode, action.schemaId)
@@ -315,7 +316,11 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
                 // 面板（数字/符号）不应被新会话事件重置，否则输入一个数字后键盘会切回全键盘
                 if (current is KeyboardViewState.NumberPanel || current is KeyboardViewState.CommonSymbolPanel) {
                     Triple(current, _page.value, _keyboardState.value)
-                } else if (currentPage is KeyboardPage.Main && currentPage.type == MainType.HANDWRITING) {
+                } else if (currentPage is KeyboardPage.Main && currentPage.type == MainType.HANDWRITING
+                    && (action.schemaId.isEmpty() || isHandwritingSchema(action.schemaId))
+                ) {
+                    // 仅在当前确为手写方案（或方案未知）时保持手写页；事件携带其他
+                    // schemaId 说明引擎已切换，手写页是残留状态，需走下方重置切回
                     Triple(_viewState.value, currentPage, _keyboardState.value)
                 } else {
                     val kb = initialKeyboardLayoutState(action.isAsciiMode, action.schemaId)

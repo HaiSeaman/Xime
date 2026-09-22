@@ -279,6 +279,8 @@ fun KeyboardLayout(
                 swipeUpHintsEnabled = swipeUpHintsEnabled,
                 swipeDownHintsEnabled = effectiveSwipeDownHintsEnabled,
                 isAsciiMode = isAsciiMode,
+                keyRows = keyRows,
+                configVersion = cfgVer,
                 onSwipeStateChange = { state, bounds -> processSwipeState(state, bounds) },
             )
         } else {
@@ -1157,6 +1159,17 @@ private fun ShiftCapsKeyButton(
 }
 
 /**
+ * 横屏分体键盘行拆分：前/后各取 ceil(n/2) 个按键，奇数行的中间键两侧重复，
+ * 与历史内置 QWERTY 拆分一致（asdfghjkl → asdfg / ghjkl，zxcvbnm → zxcv / vbnm）。
+ * 行内容来自 xime.yaml / xime.custom.yaml 的 layout.rows，自定义布局（如 Colemak）同样生效。
+ */
+internal fun splitRowForLandscape(row: List<String>): Pair<List<String>, List<String>> {
+    if (row.isEmpty()) return emptyList<String>() to emptyList()
+    val half = (row.size + 1) / 2
+    return row.take(half) to row.takeLast(half)
+}
+
+/**
  * 横屏分体键盘内容 — 当 [KeyboardLayout.isLandscape] 为 true 时渲染。
  * 将键盘拆分为左右两个面板，紧贴屏幕左右边缘，中间留空方便双手持机拇指操作。
  */
@@ -1169,6 +1182,8 @@ private fun LandscapeKeyboardContent(
     swipeUpHintsEnabled: Boolean,
     swipeDownHintsEnabled: Boolean,
     isAsciiMode: Boolean,
+    keyRows: List<List<String>>,
+    configVersion: Int = 0,
     onSwipeStateChange: ((SwipeState, Rect) -> Unit)? = null,
 ) {
     val isShifted by viewModel.isShifted.collectAsStateWithLifecycle()
@@ -1218,6 +1233,17 @@ private fun LandscapeKeyboardContent(
     val shadowEnabled = kbShadow.enabled
     val shadowElevation = kbShadow.elevation.dp
     val shadowShapeRadius = kbShadow.shapeRadius.dp
+    // 分体行拆分：行内容与竖屏同源（getKeyRows，含 xime.custom.yaml 自定义布局），
+    // 未配置时回退内置 QWERTY（与竖屏 getOrElse 兜底一致）
+    val (row0Left, row0Right) = splitRowForLandscape(
+        keyRows.getOrElse(0) { listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p") }
+    )
+    val (row1Left, row1Right) = splitRowForLandscape(
+        keyRows.getOrElse(1) { listOf("a", "s", "d", "f", "g", "h", "j", "k", "l") }
+    )
+    val (row2Left, row2Right) = splitRowForLandscape(
+        keyRows.getOrElse(2) { listOf("z", "x", "c", "v", "b", "n", "m") }
+    )
     val schemaName = uiState.schemaName
     val enterKeyText = uiState.enterKeyText
     val onKeyPressDown = callbacks.onKeyPressDown
@@ -1273,7 +1299,7 @@ private fun LandscapeKeyboardContent(
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 CompactKeyboardRowWithConfig(
-                    keys = listOf("q", "w", "e", "r", "t"),
+                    keys = row0Left,
                     onKeyPress = onKeyPress,
                     config = KeyboardRowConfig(
                         keyBackgroundColor = keyBackgroundColor,
@@ -1286,6 +1312,8 @@ private fun LandscapeKeyboardContent(
                         shadowShapeRadius = shadowShapeRadius,
                     ),
                     isShifted = visualIsShifted,
+                    isAsciiMode = isAsciiMode,
+                    configVersion = configVersion,
                     onKeyPressDown = onKeyPressDown,
                     onKeyRelease = onKeyRelease,
                     swipeDownHintsEnabled = swipeDownHintsEnabled,
@@ -1301,7 +1329,7 @@ private fun LandscapeKeyboardContent(
                     .padding(start = staggerStep)
             ) {
                 CompactKeyboardRowWithConfig(
-                    keys = listOf("a", "s", "d", "f", "g"),
+                    keys = row1Left,
                     onKeyPress = onKeyPress,
                     config = KeyboardRowConfig(
                         keyBackgroundColor = keyBackgroundColor,
@@ -1314,6 +1342,8 @@ private fun LandscapeKeyboardContent(
                         shadowShapeRadius = shadowShapeRadius,
                     ),
                     isShifted = visualIsShifted,
+                    isAsciiMode = isAsciiMode,
+                    configVersion = configVersion,
                     onKeyPressDown = onKeyPressDown,
                     onKeyRelease = onKeyRelease,
                     swipeDownHintsEnabled = swipeDownHintsEnabled,
@@ -1329,7 +1359,7 @@ private fun LandscapeKeyboardContent(
                     .padding(start = staggerStep * 2)
             ) {
                 CompactKeyboardRowWithConfig(
-                    keys = listOf("z", "x", "c", "v"),
+                    keys = row2Left,
                     onKeyPress = onKeyPress,
                     config = KeyboardRowConfig(
                         keyBackgroundColor = keyBackgroundColor,
@@ -1342,6 +1372,8 @@ private fun LandscapeKeyboardContent(
                         shadowShapeRadius = shadowShapeRadius,
                     ),
                     isShifted = visualIsShifted,
+                    isAsciiMode = isAsciiMode,
+                    configVersion = configVersion,
                     onKeyPressDown = onKeyPressDown,
                     onKeyRelease = onKeyRelease,
                     swipeDownHintsEnabled = swipeDownHintsEnabled,
@@ -1368,7 +1400,7 @@ private fun LandscapeKeyboardContent(
                         shadowElevation = shadowElevation,
                         shadowShapeRadius = shadowShapeRadius,
                     )
-                    val k2Gesture = KeysConfigHelper.getKeyGesture("'")
+                    val k2Gesture = KeysConfigHelper.getKeyGesture("'", isAsciiMode)
                     val k2Action = k2Gesture?.tap?.action
                     val k2Tap = k2Gesture?.tap?.value?.takeIf { it.isNotEmpty() }
                         ?: k2Gesture?.tap?.label?.takeIf { it.isNotEmpty() }
@@ -1439,7 +1471,7 @@ private fun LandscapeKeyboardContent(
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 CompactKeyboardRowWithConfig(
-                    keys = listOf("y", "u", "i", "o", "p"),
+                    keys = row0Right,
                     onKeyPress = onKeyPress,
                     config = KeyboardRowConfig(
                         keyBackgroundColor = keyBackgroundColor,
@@ -1452,6 +1484,8 @@ private fun LandscapeKeyboardContent(
                         shadowShapeRadius = shadowShapeRadius,
                     ),
                     isShifted = visualIsShifted,
+                    isAsciiMode = isAsciiMode,
+                    configVersion = configVersion,
                     onKeyPressDown = onKeyPressDown,
                     onKeyRelease = onKeyRelease,
                     swipeDownHintsEnabled = swipeDownHintsEnabled,
@@ -1467,7 +1501,7 @@ private fun LandscapeKeyboardContent(
                     .padding(end = staggerStep)
             ) {
                 CompactKeyboardRowWithConfig(
-                    keys = listOf("g", "h", "j", "k", "l"),
+                    keys = row1Right,
                     onKeyPress = onKeyPress,
                     config = KeyboardRowConfig(
                         keyBackgroundColor = keyBackgroundColor,
@@ -1477,6 +1511,8 @@ private fun LandscapeKeyboardContent(
                         swipeFontSize = landscapeSwipeFontSize,
                     ),
                     isShifted = visualIsShifted,
+                    isAsciiMode = isAsciiMode,
+                    configVersion = configVersion,
                     onKeyPressDown = onKeyPressDown,
                     onKeyRelease = onKeyRelease,
                     swipeDownHintsEnabled = swipeDownHintsEnabled,
@@ -1494,7 +1530,7 @@ private fun LandscapeKeyboardContent(
             ) {
                 Box(modifier = Modifier.weight(4f)) {
                     CompactKeyboardRowWithConfig(
-                        keys = listOf("v", "b", "n", "m"),
+                        keys = row2Right,
                         onKeyPress = onKeyPress,
                         config = KeyboardRowConfig(
                             keyBackgroundColor = keyBackgroundColor,
@@ -1504,6 +1540,8 @@ private fun LandscapeKeyboardContent(
                             swipeFontSize = landscapeSwipeFontSize,
                         ),
                         isShifted = visualIsShifted,
+                        isAsciiMode = isAsciiMode,
+                        configVersion = configVersion,
                         onKeyPressDown = onKeyPressDown,
                         onKeyRelease = onKeyRelease,
                         swipeDownHintsEnabled = swipeDownHintsEnabled,
@@ -1571,7 +1609,7 @@ private fun LandscapeKeyboardContent(
                     shadowElevation = shadowElevation,
                     shadowShapeRadius = shadowShapeRadius,
                 )
-                val k4Gesture = KeysConfigHelper.getKeyGesture("earth")
+                val k4Gesture = KeysConfigHelper.getKeyGesture("earth", isAsciiMode)
                 val k4Action = k4Gesture?.tap?.action
                 val k4Value = k4Gesture?.tap?.value?.takeIf { it.isNotEmpty() } ?: k4Gesture?.tap?.label?.takeIf { it.isNotEmpty() } ?: "ime_switch"
                 val k4Label = k4Gesture?.tap?.label?.takeIf { it.isNotEmpty() } ?: "中"
