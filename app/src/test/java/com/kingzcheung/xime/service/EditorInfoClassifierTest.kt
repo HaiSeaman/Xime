@@ -10,6 +10,7 @@ import org.junit.Test
  * EditorInfoClassifier 分类判定：
  * - 受限输入框（密码/终端/NO_SUGGESTIONS）→ isRestrictedEditor
  * - 纯数字输入框（数字/电话/日期时间）→ isNumberEditor
+ * - 密码类输入框（ascii 会话决策强制英文）→ isPasswordEditor
  */
 class EditorInfoClassifierTest {
 
@@ -227,5 +228,63 @@ class EditorInfoClassifierTest {
     @Test
     fun `普通文本框不算数字框`() {
         assertFalse(EditorInfoClassifier.isNumberEditor(editorInfo(InputType.TYPE_CLASS_TEXT)))
+    }
+
+    // ── isPasswordEditor：ascii 会话决策（密码框强制英文）──
+
+    @Test
+    fun `null输入框不算密码框`() {
+        assertFalse(EditorInfoClassifier.isPasswordEditor(null))
+    }
+
+    @Test
+    fun `文本密码框识别为密码框`() {
+        assertTrue(
+            EditorInfoClassifier.isPasswordEditor(
+                editorInfo(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+            )
+        )
+    }
+
+    @Test
+    fun `可见密码框识别为密码框`() {
+        assertTrue(
+            EditorInfoClassifier.isPasswordEditor(
+                editorInfo(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
+            )
+        )
+    }
+
+    @Test
+    fun `网页密码框识别为密码框`() {
+        assertTrue(
+            EditorInfoClassifier.isPasswordEditor(
+                editorInfo(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
+            )
+        )
+    }
+
+    @Test
+    fun `数字密码框识别为密码框`() {
+        assertTrue(
+            EditorInfoClassifier.isPasswordEditor(
+                editorInfo(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
+            )
+        )
+    }
+
+    @Test
+    fun `TYPE_NULL不算密码框_终端场景保留中文输入`() {
+        assertFalse(EditorInfoClassifier.isPasswordEditor(editorInfo(InputType.TYPE_NULL)))
+    }
+
+    @Test
+    fun `普通文本与邮箱框不算密码框`() {
+        assertFalse(EditorInfoClassifier.isPasswordEditor(editorInfo(InputType.TYPE_CLASS_TEXT)))
+        assertFalse(
+            EditorInfoClassifier.isPasswordEditor(
+                editorInfo(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+            )
+        )
     }
 }

@@ -445,32 +445,9 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                 }
                 "mode_change" -> {
                 }
-                "ime_switch" -> {
-                    // 乐观更新：立即按目标模式切换 UI（主键盘布局/面板字符），不等引擎异步切换，
-                    // 消除"进入面板/切键盘后才闪变"的可见延迟（引擎切换完成后权威同步，一致则无感）。
-                    val state = service.uiState.value
-                    val optimisticTarget = !state.isAsciiMode
-                    val schemaId = service.rimeEngine.getCurrentSchema()
-                    withContext(Dispatchers.Main) {
-                        service.uiState.value = service.uiState.value.copy(isAsciiMode = optimisticTarget)
-                        service.keyboardViewModel.dispatch(
-                            com.kingzcheung.xime.ui.keyboard.KeyboardDispatchAction.AsciiModeChanged(optimisticTarget, schemaId)
-                        )
-                    }
-                    // 在 key-processing 线程上执行切换：toggleAsciiMode 阻塞等待 rimeLock
-                    // （部署/维护持锁时排队，完成后自动切换），不在主线程阻塞避免 ANR。
-                    val t0 = System.nanoTime()
-                    FileLogger.i(XimeInputMethodService.TAG, "ime_switch dispatched, ui ascii=${service.uiState.value.isAsciiMode}, thread=${Thread.currentThread().name}")
-                    if (!service.schemaController.switchInputMethod()) {
-                        // 引擎不可用：回滚乐观状态
-                        withContext(Dispatchers.Main) {
-                            service.uiState.value = service.uiState.value.copy(isAsciiMode = optimisticTarget)
-                            service.keyboardViewModel.dispatch(
-                                com.kingzcheung.xime.ui.keyboard.KeyboardDispatchAction.AsciiModeChanged(optimisticTarget, schemaId)
-                            )
-                        }
-                    }
-                    FileLogger.i(XimeInputMethodService.TAG, "ime_switch handled, total ${(System.nanoTime() - t0) / 1_000_000}ms (queue+rimeLock+main)")
+                "ime_switch", "ime_switch_panel" -> {
+                    // 面板来源（ime_switch_panel）走 PANEL_SYNC：不持久化，见 dispatchAsciiSwitch
+                    dispatchAsciiSwitch(persist = key == "ime_switch")
                 }
                 "abc" -> {
                     service.calculatorEngine.clear()
@@ -730,6 +707,41 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
             }
         }
         service.keyJobs.trySend(job)
+    }
+
+    /**
+     * ascii 切换统一分发（key-processing 协程内执行）。
+     *
+     * 乐观更新：立即按目标模式切换 UI（主键盘布局/面板字符），不等引擎异步切换，
+     * 消除"进入面板/切键盘后才闪变"的可见延迟（引擎切换完成后权威同步，一致则无感）。
+     * [persist] 仅决定日志溯源原因（USER_TOGGLE / PANEL_SYNC）；ascii 为会话级
+     * 状态，两种来源均不写 user.yaml，收起键盘后回到默认中文。
+     */
+    private suspend fun dispatchAsciiSwitch(persist: Boolean) {
+        val original = service.uiState.value.isAsciiMode
+        val optimisticTarget = !original
+        val schemaId = service.rimeEngine.getCurrentSchema()
+        withContext(Dispatchers.Main) {
+            service.uiState.value = service.uiState.value.copy(isAsciiMode = optimisticTarget)
+            service.keyboardViewModel.dispatch(
+                com.kingzcheung.xime.ui.keyboard.KeyboardDispatchAction.AsciiModeChanged(optimisticTarget, schemaId)
+            )
+        }
+        // 在 key-processing 线程上执行切换：toggleAsciiMode 阻塞等待 rimeLock
+        // （部署/维护持锁时排队，完成后自动切换），不在主线程阻塞避免 ANR。
+        val t0 = System.nanoTime()
+        FileLogger.i(XimeInputMethodService.TAG, "dispatchAsciiSwitch(persist=$persist): ui ascii=${service.uiState.value.isAsciiMode}, thread=${Thread.currentThread().name}")
+        val reason = if (persist) AsciiModeController.Reason.USER_TOGGLE else AsciiModeController.Reason.PANEL_SYNC
+        if (!service.asciiModeController.switchAscii(reason)) {
+            // 引擎不可用：回滚乐观状态到切换前的原值
+            withContext(Dispatchers.Main) {
+                service.uiState.value = service.uiState.value.copy(isAsciiMode = original)
+                service.keyboardViewModel.dispatch(
+                    com.kingzcheung.xime.ui.keyboard.KeyboardDispatchAction.AsciiModeChanged(original, schemaId)
+                )
+            }
+        }
+        FileLogger.i(XimeInputMethodService.TAG, "dispatchAsciiSwitch handled, total ${(System.nanoTime() - t0) / 1_000_000}ms (queue+rimeLock+main)")
     }
 
     /**

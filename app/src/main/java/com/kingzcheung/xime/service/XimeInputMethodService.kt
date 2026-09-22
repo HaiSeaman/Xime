@@ -376,6 +376,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
     internal val schemaController = ImeSchemaController(this)
 
+    /** ascii（中/西文）模式唯一控制入口：切换/会话决策/归位均收敛于此 */
+    internal val asciiModeController = AsciiModeController(this)
+
     internal val textCommit = ImeTextCommit(this)
     
     private val inlineSuggestionManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1784,9 +1787,11 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         // restarting=true 表示同一输入会话内的状态刷新（应用 restartInput），此时不应
         // 重置布局，否则数字/符号面板会在输入中被切回全键盘。
         if (RimeEngine.isInitialized() && !restarting) {
-            val rimeAscii = rimeEngine.isAsciiMode()
-            FileLogger.i(TAG, "onStartInput: reset keyboard, rimeAscii=$rimeAscii")
-            uiState.value = uiState.value.copy(isAsciiMode = rimeAscii)
+            // ascii 确定性决策：默认中文（英文态不跨收起存活），密码框临时英文。
+            // 不读引擎当前值——上次会话收起时的落点不再决定本次初始状态
+            val startAscii = asciiModeController.applyStartDecision(attribute)
+            FileLogger.i(TAG, "onStartInput: reset keyboard, startAscii=$startAscii")
+            uiState.value = uiState.value.copy(isAsciiMode = startAscii)
             // currentSchemaId 为空（如引擎重建后 updateSchemaName 尚未完成）时，
             // 用持久化方案兜底，避免布局退化为 26 键全键盘
             val schemaId = uiState.value.currentSchemaId
@@ -1798,7 +1803,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 "onStartInput: editor inputType=0x${Integer.toHexString(attribute?.inputType ?: 0)}, " +
                     "restricted=$editorRestricted, forceNumberPanel=$forceNumberPanel"
             )
-            keyboardViewModel.resetKeyboard(rimeAscii, schemaId, forceNumberPanel)
+            keyboardViewModel.resetKeyboard(startAscii, schemaId, forceNumberPanel)
         } else {
             val rimeAscii = if (RimeEngine.isInitialized()) rimeEngine.isAsciiMode() else "n/a"
             FileLogger.i(TAG, "onStartInput: skip keyboard reset, restarting=$restarting, rimeAscii=$rimeAscii, ui=${uiState.value.isAsciiMode}")
@@ -2043,6 +2048,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         super.onFinishInput()
         inlineSuggestionManager?.clear()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        // 会话结束：引擎 ascii 归位默认中文，英文态不跨会话残留
+        asciiModeController.restoreDefaultChoice()
         clearInputState()
         recentClipboardItemsState.value = emptyList()
     }

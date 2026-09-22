@@ -373,7 +373,8 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
     internal fun toggleSchemaSwitch(sw: com.kingzcheung.xime.viewmodel.SchemaSwitchUiState) {
         service.serviceScope.launch(service.keyProcessingDispatcher) {
             if (sw.name == "ascii_mode") {
-                service.schemaController.switchInputMethod()
+                // 菜单中西切换 = 用户显式操作（USER_TOGGLE，会话级，不持久化）
+                service.asciiModeController.switchAscii(AsciiModeController.Reason.USER_TOGGLE)
             } else if (sw.name.isNotEmpty()) {
                 val newValue = !service.rimeEngine.getOption(sw.name)
                 service.rimeEngine.setOption(sw.name, newValue)
@@ -398,15 +399,17 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
         }
     }
 
-    /** 从 librime user.yaml 恢复方案选项（中/西、简/繁等），在切换方案后调用。 */
+    /** 从 librime user.yaml 恢复方案选项（简/繁等），在切换方案后调用。
+     *  ascii_mode 不在此恢复：由 AsciiModeController.applyStartDecision 按编辑框
+     *  类型与用户显式选择决策，避免通用恢复盖过会话级决策。 */
     internal fun restorePersistedSchemaOptions() {
         if (!RimeEngine.isInitialized()) return
         val schemaId = service.rimeEngine.getCurrentSchema()
         if (schemaId.isEmpty()) return
-        val rimeAsciiBefore = service.rimeEngine.isAsciiMode()
         val defs = SchemaManager.getSchemaSwitches(service, schemaId)
         for (def in defs) {
             if (def.name.isNotEmpty()) {
+                if (def.name == "ascii_mode") continue
                 service.rimeEngine.setOption(def.name, service.rimeEngine.getUserConfigBool("var/option/${def.name}"))
             } else if (def.options.isNotEmpty()) {
                 val activeIndex = def.options.indexOfFirst { service.rimeEngine.getUserConfigBool("var/option/$it") }
@@ -414,10 +417,6 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
                     def.options.forEachIndexed { i, opt -> service.rimeEngine.setOption(opt, i == activeIndex) }
                 }
             }
-        }
-        val rimeAsciiAfter = service.rimeEngine.isAsciiMode()
-        if (rimeAsciiBefore != rimeAsciiAfter) {
-            FileLogger.i(XimeInputMethodService.TAG, "restorePersistedSchemaOptions: ascii $rimeAsciiBefore -> $rimeAsciiAfter (ui=${service.uiState.value.isAsciiMode})")
         }
     }
 
