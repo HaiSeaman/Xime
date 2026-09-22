@@ -203,7 +203,7 @@ fun CandidatePage(
                 .padding(horizontal = 8.dp)
         ) {
             // ── 左栏：九键为音节拼音候选（输入/选择态）或 side_symbols（空闲态，
-            // 连体键——首尾圆角、中间直角，对齐数字键盘左栏）+ 候选/单字切换（下）。
+            // 连体面板——圆角背景与滚动裁剪由列表容器统一负责）+ 候选/单字切换（下）。
             // 条目 ≤4 均分填满；>4 最多显示 4 条、LazyColumn 滚动（对齐九键左栏）──
             Column(
                 modifier = railWidthModifier
@@ -215,6 +215,10 @@ fun CandidatePage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(3f)
+                        // 圆角由容器统一裁剪：列表滚动时内容被裁在圆角内，
+                        // 圆角不再依赖首/末 item 的位置（修复滚动时首/尾圆角丢失）
+                        .clip(RoundedCornerShape(LocalKeyCornerRadius.current))
+                        .background(keyBg)
                         .onSizeChanged { railListHeightPx = it.height }
                 ) {
                     if (railItems.size <= 4) {
@@ -228,8 +232,6 @@ fun CandidatePage(
                                 keyBg = keyBg,
                                 textColor = state.textColor,
                                 modifier = Modifier.weight(1f),
-                                isFirst = index == 0,
-                                isLast = index == railItems.lastIndex,
                                 isSelected = isPinyinRail && index == state.railSelectedPinyinIndex,
                                 accentColor = state.railAccentColor,
                                 isPinyin = isPinyinRail
@@ -251,8 +253,6 @@ fun CandidatePage(
                                     keyBg = keyBg,
                                     textColor = state.textColor,
                                     modifier = Modifier.height(itemHeightDp),
-                                    isFirst = index == 0,
-                                    isLast = index == railItems.lastIndex,
                                     isSelected = isPinyinRail && index == state.railSelectedPinyinIndex,
                                     accentColor = state.railAccentColor,
                                     isPinyin = isPinyinRail
@@ -658,8 +658,9 @@ private fun FlexRowDivider(color: Color) {
 }
 
 /**
- * 左栏连体符号键（样式对齐数字键盘 NumberSymbolKey）：同一列内首条目上圆角、
- * 末条目下圆角、中间直角——整列背景连成一体；按压背景加深（0.7 透明度）。
+ * 左栏符号/拼音条目（样式对齐数字键盘 NumberSymbolKey）：直角实色条目，
+ * 整列连成一体；列容器负责圆角背景与滚动裁剪（首尾圆角不再附着在条目上，
+ * 避免滚动时圆角随首/末条目滚出视口而丢失）。按压背景加深（0.7 透明度）。
  * [isSelected] 时渲染选中胶囊（对齐九键 CandidateItem 的 accentColor 高亮），
  * [isPinyin] 用拼音字号（13sp，对齐九键左栏），否则符号字号 16sp。
  */
@@ -670,19 +671,10 @@ private fun CandidateRailSymbolKey(
     keyBg: Color,
     textColor: Color,
     modifier: Modifier = Modifier,
-    isFirst: Boolean = false,
-    isLast: Boolean = false,
     isSelected: Boolean = false,
     accentColor: Color = Color.Unspecified,
     isPinyin: Boolean = false,
 ) {
-    val cornerRadius = LocalKeyCornerRadius.current
-    val shape = RoundedCornerShape(
-        topStart = if (isFirst) cornerRadius else 0.dp,
-        topEnd = if (isFirst) cornerRadius else 0.dp,
-        bottomStart = if (isLast) cornerRadius else 0.dp,
-        bottomEnd = if (isLast) cornerRadius else 0.dp
-    )
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val pillColor = if (accentColor == Color.Unspecified) textColor else accentColor
@@ -690,7 +682,6 @@ private fun CandidateRailSymbolKey(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(shape)
             .background(if (isPressed) keyBg.copy(alpha = 0.7f) else keyBg)
             .tolerantClick(
                 showRipple = false,
