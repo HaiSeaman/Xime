@@ -417,9 +417,9 @@ class SpeechRecognitionManager(private val context: Context) {
         /**
          * 停止请求标志：不能只依赖线程中断标志停止循环。
          *
-         * processAudioChunk 会经 LuaScriptRuntime.runGuarded 的 FutureTask.get 执行，
+         * processAudioChunk 会经 JsScriptRuntime.runGuarded 的 FutureTask.get 执行，
          * FutureTask.awaitDone 内部用 Thread.interrupted() 检查中断状态并**清除中断标志**，
-         * 随后 LuaScriptRuntime.call 吞掉 InterruptedException 正常返回 NIL——
+         * 随后 JsScriptRuntime.call 吞掉 InterruptedException 正常返回 NIL——
          * 于是中断标志被消费后 while (!interrupted()) 永远为真，录音线程无法停止，
          * stopRecognition 的 join() 永不返回，后端（WebSocket）与麦克风一直后台占用。
          */

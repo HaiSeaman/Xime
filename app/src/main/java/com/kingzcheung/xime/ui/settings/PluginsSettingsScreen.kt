@@ -1,5 +1,7 @@
 package com.kingzcheung.xime.ui.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.filled.AddBox
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Face
@@ -86,6 +89,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kingzcheung.xime.BuildConfig
 import com.kingzcheung.xime.plugin.ExtensionManager
 import com.kingzcheung.xime.plugin.core.api.PluginIcon
 import com.kingzcheung.xime.plugin.core.model.Activation
@@ -94,12 +98,16 @@ import com.kingzcheung.xime.plugin.core.model.PluginSource
 import com.kingzcheung.xime.plugin.core.model.PluginInfo
 import com.kingzcheung.xime.plugin.core.model.TrustLevel
 import com.kingzcheung.xime.plugin.core.runtime.PluginManager
+import com.kingzcheung.xime.plugin.core.security.ErrorCategory
 import com.kingzcheung.xime.plugin.core.security.PluginErrorLog
 import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.viewmodel.PluginsSettingsViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -886,9 +894,23 @@ private fun PluginErrorDialog(
     onDismiss: () -> Unit,
     onClear: () -> Unit
 ) {
+    val context = LocalContext.current
+    val pluginInfo = remember(pluginId) {
+        PluginManager.getAllInstallPlugins().firstOrNull { it.id == pluginId }
+    }
+    val diagnosticText = remember(pluginId, errors) {
+        buildPluginDiagnosticText(
+            hostVersionName = BuildConfig.VERSION_NAME,
+            pluginName = pluginName,
+            pluginId = pluginId,
+            pluginVersion = pluginInfo?.versionName ?: "?",
+            enabled = pluginInfo?.enabled ?: true,
+            errors = errors
+        )
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { 
+        title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Default.Warning,
@@ -904,49 +926,156 @@ private fun PluginErrorDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(300.dp)
-                    .verticalScroll(rememberScrollState())
+                    .height(320.dp)
             ) {
-                errors.forEachIndexed { index, error ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-                        )
+                if (errors.isEmpty()) {
+                    Text(
+                        "暂无错误记录",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        "点击「复制诊断信息」后粘贴给插件作者即可定位问题。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text(
-                                text = "#${index + 1} ${error.operation}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                            Text(
-                                text = error.message,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            val stackTraceText = error.stackTrace
-                            if (stackTraceText != null && stackTraceText.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = stackTraceText.take(200) + "...",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                )
-                            }
+                        errors.forEachIndexed { index, error ->
+                            PluginErrorCard(index = index, error = error)
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onClear) {
-                Text("清除日志", color = MaterialTheme.colorScheme.error)
+            TextButton(
+                onClick = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("Xime 插件诊断信息", diagnosticText))
+                    Toast.makeText(context, "诊断信息已复制，可粘贴给插件作者", Toast.LENGTH_SHORT).show()
+                }
+            ) {
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("复制诊断信息")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
+            Row {
+                TextButton(onClick = onClear) {
+                    Text("清除日志", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("关闭")
+                }
             }
         }
     )
+}
+
+@Composable
+private fun PluginErrorCard(index: Int, error: PluginErrorLog.PluginError) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "#${index + 1} · ${formatErrorTime(error.timestamp)} · ${categoryLabel(error.category)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = PluginErrorLog.userMessage(error),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = PluginErrorLog.userHint(error),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = error.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            val stackTraceText = error.stackTrace
+            if (stackTraceText != null && stackTraceText.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stackTraceText.take(200) + "...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        }
+    }
+}
+
+/** 分类徽章短名（用户可读）。 */
+internal fun categoryLabel(category: ErrorCategory): String = when (category) {
+    ErrorCategory.SCRIPT_ERROR -> "脚本错误"
+    ErrorCategory.NETWORK_DENIED -> "访问被拒绝"
+    ErrorCategory.HTTP_ERROR -> "网络失败"
+    ErrorCategory.TIMEOUT_POISONED -> "已停用"
+    ErrorCategory.STREAM_ERROR -> "连接中断"
+    ErrorCategory.OTHER -> "其他"
+}
+
+private fun formatErrorTime(timestamp: Long): String =
+    SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+
+/**
+ * 组装一键反馈作者的诊断文本（含宿主/插件版本与全部错误详情）。
+ * 纯函数，可单测。
+ */
+internal fun buildPluginDiagnosticText(
+    hostVersionName: String,
+    pluginName: String,
+    pluginId: String,
+    pluginVersion: String,
+    enabled: Boolean,
+    errors: List<PluginErrorLog.PluginError>
+): String = buildString {
+    appendLine("Xime v$hostVersionName")
+    appendLine("插件：$pluginName ($pluginId) v$pluginVersion ${if (enabled) "已启用" else "已禁用"}")
+    appendLine()
+    appendLine("错误记录（${errors.size} 条）：")
+    if (errors.isEmpty()) {
+        appendLine("（无）")
+    }
+    errors.forEachIndexed { index, error ->
+        appendLine("${index + 1}. ${formatErrorTime(error.timestamp)} [${categoryLabel(error.category)}]")
+        appendLine("   ${PluginErrorLog.userMessage(error)}")
+        appendLine("   ${PluginErrorLog.userHint(error)}")
+        appendLine("   详情：${error.message}")
+        error.stackTrace?.let { stack ->
+            appendLine("   堆栈：")
+            stack.lineSequence().take(60).forEach { line ->
+                appendLine("     $line")
+            }
+        }
+        appendLine()
+    }
 }

@@ -374,12 +374,15 @@ fun KeyboardView(
                     isFocused = state.toolPanelInputFocused,
                     isLoading = state.toolPanelLoading,
                     initialText = state.toolPanelPrefillText,
+                    controls = state.toolPanelUiNodes,
                     backgroundColor = Color.Transparent,
                     textColor = keyTextColor,
                     accentColor = accentColor,
                     cardBgColor = keyBgColor,
                     onClose = { callbacks.onToolPanelClose?.invoke() },
                     onFocusChange = { focused -> callbacks.onToolPanelFocusChange?.invoke(focused) },
+                    onFieldInput = { key, value -> callbacks.onToolPanelFieldInput?.invoke(key, value) },
+                    onPanelAction = { actionId -> callbacks.onToolPanelAction?.invoke(actionId) },
                 )
             }
 
