@@ -194,6 +194,9 @@ fun KeyboardLayout(
             )
         )
     }
+    var landscapeSplitKeyboardEnabled by remember {
+        mutableStateOf(SettingsPreferences.isLandscapeSplitKeyboardEnabled(context))
+    }
     val effectiveSwipeDownHintsEnabled = swipeDownHintsEnabled
 
     // 监听设置变化
@@ -207,6 +210,10 @@ fun KeyboardLayout(
 
                     SettingsPreferences.KEY_SWIPE_DOWN_HINTS_ENABLED ->
                         swipeDownHintsEnabled = SettingsPreferences.isSwipeDownHintsEnabled(context)
+
+                    SettingsPreferences.KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED ->
+                        landscapeSplitKeyboardEnabled =
+                            SettingsPreferences.isLandscapeSplitKeyboardEnabled(context)
                 }
             }
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -251,6 +258,7 @@ fun KeyboardLayout(
     )
 
     val isLandscape = !uiState.isFloatingMode && LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
+    val useLandscapeSplitKeyboard = isLandscape && landscapeSplitKeyboardEnabled
 
     CompositionLocalProvider(
         LocalKeyCornerRadius provides kbKey.cornerRadius.dp,
@@ -270,7 +278,7 @@ fun KeyboardLayout(
             }
             .padding(bottom = if (uiState.isFloatingMode || isLandscape) {0.dp} else {0.dp})
     ) {
-            if (isLandscape) {
+            if (useLandscapeSplitKeyboard) {
             LandscapeKeyboardContent(
                 onKeyPress = onKeyPress,
                 viewModel = viewModel,
@@ -1170,7 +1178,7 @@ internal fun splitRowForLandscape(row: List<String>): Pair<List<String>, List<St
 }
 
 /**
- * 横屏分体键盘内容 — 当 [KeyboardLayout.isLandscape] 为 true 时渲染。
+ * 横屏分体键盘内容 — 横屏且用户开启分体布局时渲染。
  * 将键盘拆分为左右两个面板，紧贴屏幕左右边缘，中间留空方便双手持机拇指操作。
  */
 @Composable
