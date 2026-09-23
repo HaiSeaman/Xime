@@ -523,9 +523,9 @@ object SettingsPreferences {
         getPrefs(context).edit().putBoolean(KEY_SHOW_PRESS_BUBBLE, show).apply()
     }
 
-    /** 横屏时是否使用分体键盘，默认开启以保持现有行为。 */
+    /** 横屏时是否使用分体键盘，默认关闭，由用户按需开启。 */
     fun isLandscapeSplitKeyboardEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED, true)
+        return getPrefs(context).getBoolean(KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED, false)
     }
 
     fun setLandscapeSplitKeyboardEnabled(context: Context, enabled: Boolean) {
