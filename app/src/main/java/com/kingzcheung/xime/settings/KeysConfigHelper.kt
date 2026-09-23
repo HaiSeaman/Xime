@@ -56,6 +56,12 @@ data class GestureDef(
     val label: String = "",
     /** 多行标签（YAML 数组格式），每行作为独立字符串，用于多行显示 */
     val labels: List<String> = emptyList(),
+    /**
+     * 手势动作。槽位默认（YAML 省略 action 时）：tap = SEND_RIME（走按键路由进
+     * rime，与实际执行一致），swipe/long_press = COMMIT（输出 value，直接上屏
+     * 路径）。键盘分发层将 tap 上的 SEND_RIME 与 COMMIT 同等处理（均走
+     * onKeyPress），与旧配置行为完全一致。
+     */
     val action: GestureAction? = GestureAction.COMMIT,
     val value: String = "",
     val icon: String = "",
@@ -198,7 +204,7 @@ private fun parseKeyGestureConfig(map: com.charleskorn.kaml.YamlMap): KeyGesture
     for ((kNode, vNode) in map.entries) {
         val name = (kNode as? com.charleskorn.kaml.YamlScalar)?.content ?: continue
         when (name) {
-            "tap" -> tap = parseGestureNode(vNode)
+            "tap" -> tap = parseGestureNode(vNode, GestureAction.SEND_RIME)
             "swipe_up" -> swipeUp = parseGestureNode(vNode)
             "swipe_down" -> swipeDown = parseGestureNode(vNode)
             "long_press" -> longPress = parseLongPress(vNode)
@@ -234,19 +240,31 @@ private fun parseLongPress(node: com.charleskorn.kaml.YamlNode): LongPressConfig
     return null
 }
 
-private fun parseGestureNode(node: com.charleskorn.kaml.YamlNode): GestureDef {
-    // 字符串 → commit
+/**
+ * 解析单个手势节点为 [GestureDef]。
+ *
+ * [defaultAction] 为该手势槽位的语义默认（字符串简写与对象格式省略 action 时生效）：
+ * - tap → SEND_RIME（走按键路由进 rime，与 tap 实际执行 onKeyPress 的语义一致；
+ *   键盘分发层将其与 COMMIT 同等处理，与旧配置行为完全一致）；
+ * - swipe_up / swipe_down / long_press → COMMIT（输出 value，直接上屏路径——
+ *   九键/笔画的 swipeHandlerFor 按 COMMIT 走直接上屏，上滑数字不能进引擎组合）。
+ */
+private fun parseGestureNode(
+    node: com.charleskorn.kaml.YamlNode,
+    defaultAction: GestureAction = GestureAction.COMMIT,
+): GestureDef {
+    // 字符串 → 按槽位默认动作
     if (node is com.charleskorn.kaml.YamlScalar) {
         val text = node.content
         val icon = if (text.startsWith("@")) text.removePrefix("@") else ""
         val cleanLabel = if (icon.isNotEmpty()) "" else text
-        return GestureDef(label = cleanLabel, action = GestureAction.COMMIT, value = text, icon = icon)
+        return GestureDef(label = cleanLabel, action = defaultAction, value = text, icon = icon)
     }
     // 映射 → 完整定义
     if (node is com.charleskorn.kaml.YamlMap) {
         var label = ""
         var labels: List<String> = emptyList()
-        var action: GestureAction? = GestureAction.COMMIT
+        var action: GestureAction? = defaultAction
         var value = ""
         var display = "key"
         for ((k, v) in node.entries) {

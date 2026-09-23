@@ -345,11 +345,14 @@ color_schemes:
 #   long_press: 长按（数组，弹出气泡后左右滑动选择）
 #
 # 每个手势的值格式：
-#   - 字符串 "a" → 上屏该文本，显示也是它
+#   - 字符串 "a" → 按槽位默认动作（tap 为 send_rime：走按键路由进 rime，与手敲
+#     该键一致；swipe/长按为 commit：输出 value 直接上屏），显示也是它
 #   - { label, action, value }
 #     label:  按键上显示的文字
-#     action: commit（上屏）, command（内置命令，value 为命令名）, select_all, copy, cut,
-#             paste, line_start, line_end, undo, none, repeat
+#     action: send_rime（走按键路由进 rime 组合，tap 的默认，与手敲该键同一路由）,
+#             commit（输出 value 直接上屏，swipe/长按的默认）,
+#             command（内置命令，value 为命令名）,
+#             select_all, copy, cut, paste, line_start, line_end, undo, none, repeat
 #     command 可用命令：
 #       clear_composition - 清空当前输入编码和候选词
 #     value:  上屏时的输出文本（不指定则用 label）
