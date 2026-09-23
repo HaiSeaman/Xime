@@ -56,7 +56,7 @@ data class ClipboardProfile(
 }
 
 /**
- * 剪贴板同步插件能力接口（宿主侧，由 Lua 适配器实现，协议逻辑在 Lua）。
+ * 剪贴板同步插件能力接口（宿主侧，由 JS 适配器实现，协议逻辑在 JS）。
  *
  * 同步引擎（宿主 ClipboardSyncBridge）只依赖此接口做 push / pull / 连接测试，
  * 具体传输协议（WebDAV / S3 / ximed HTTP）由插件 Lua 用 `host.http` + `host.crypto`

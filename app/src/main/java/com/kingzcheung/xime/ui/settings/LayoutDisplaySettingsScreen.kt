@@ -72,6 +72,40 @@ fun LayoutDisplaySettingsContent(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
+                SettingsSection(title = "键盘布局", content = {
+                    var landscapeSplitKeyboardEnabled by remember {
+                        mutableStateOf(SettingsPreferences.isLandscapeSplitKeyboardEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "横屏使用分体键盘",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "关闭后，横屏将显示连续的完整键盘布局",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = landscapeSplitKeyboardEnabled,
+                            onCheckedChange = { enabled ->
+                                landscapeSplitKeyboardEnabled = enabled
+                                SettingsPreferences.setLandscapeSplitKeyboardEnabled(context, enabled)
+                            }
+                        )
+                    }
+                })
+            }
+
+            item {
                 SettingsSection(title = "候选词", content = {
                     val candidateTextSizePref = SettingsPreferences.getCandidateTextSize(context)
                     var candidateTextSize by remember(candidateTextSizePref) {

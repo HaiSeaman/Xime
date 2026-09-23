@@ -63,6 +63,10 @@ data class KeyboardCallbacks(
      */
     val onToolPanelAction: ((actionId: String) -> Unit)? = null,
     /**
+     * direct 控件行字段变更（文本输入/下拉选择）：实时通知插件（key = ui 节点 key）。
+     */
+    val onToolPanelFieldInput: ((key: String, value: String) -> Unit)? = null,
+    /**
      * 通用工具面板输入框焦点变化。
      */
     val onToolPanelFocusChange: ((Boolean) -> Unit)? = null,

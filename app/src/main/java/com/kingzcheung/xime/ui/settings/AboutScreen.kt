@@ -136,7 +136,7 @@ fun AboutContent(
     onNavigateToPrivacy: () -> Unit,
     onNavigateToLicenses: () -> Unit,
     onNavigateToLogViewer: () -> Unit = {},
-    onNavigateToHandwritingCapture: () -> Unit = {},
+    onNavigateToDeveloper: () -> Unit = {},
     onNavigateToStorageSpace: () -> Unit = {},
 ) {
     val uriHandler = LocalUriHandler.current
@@ -144,10 +144,11 @@ fun AboutContent(
     var verboseLoggingEnabled by remember {
         mutableStateOf(SettingsPreferences.isVerboseLoggingEnabled(context))
     }
-    // 彩蛋入口：1.5 秒内连点"设备信息"卡片 7 次解锁"手写数据采集"（平时隐藏）
+    // 彩蛋入口：1.5 秒内连点"设备信息"卡片 7 次解锁"开发者选项"（平时隐藏，
+    // 页内收纳手写数据采集 / 插件开发模式等开发者功能）
     var captureTapCount by remember { mutableStateOf(0) }
     var lastCaptureTapMs by remember { mutableStateOf(0L) }
-    var captureUnlocked by rememberSaveable { mutableStateOf(false) }
+    var devUnlocked by rememberSaveable { mutableStateOf(false) }
     fun onDeviceInfoTapped() {
         val now = System.currentTimeMillis()
         if (now - lastCaptureTapMs > 1500L) captureTapCount = 0
@@ -155,8 +156,8 @@ fun AboutContent(
         captureTapCount++
         if (captureTapCount >= 7) {
             captureTapCount = 0
-            captureUnlocked = true
-            android.widget.Toast.makeText(context, "已解锁手写数据采集入口", android.widget.Toast.LENGTH_SHORT).show()
+            devUnlocked = true
+            android.widget.Toast.makeText(context, "已解锁开发者入口", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -389,16 +390,16 @@ fun AboutContent(
                             title = "存储空间",
                             onClick = onNavigateToStorageSpace
                         )
-                        if (captureUnlocked) {
+                        if (devUnlocked) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = 72.dp),
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
                             SettingsItem(
-                                icon = Icons.Default.Edit,
-                                title = "手写数据采集",
-                                onClick = onNavigateToHandwritingCapture
+                                icon = Icons.Default.Code,
+                                title = "开发者选项",
+                                onClick = onNavigateToDeveloper
                             )
                         }
                         if (BuildConfig.DEBUG) {
@@ -456,7 +457,7 @@ fun AboutContent(
 }
 
 @Composable
-private fun SettingsItem(
+internal fun SettingsItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     onClick: () -> Unit,
