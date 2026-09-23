@@ -627,7 +627,8 @@ fun KeyboardLayout(
                             } else null
                             val k2OnClick: () -> Unit = remember(k2TapAction, k2TapValue, onKeyPress, onGestureAction) {
                                 {
-                                    if (k2TapAction != null && k2TapAction != GestureAction.COMMIT) {
+                                    // SEND_RIME（tap 默认语义）与 COMMIT 同等走敲键路由，保持与旧配置行为一致
+                                    if (k2TapAction != null && k2TapAction != GestureAction.COMMIT && k2TapAction != GestureAction.SEND_RIME) {
                                         onGestureAction?.invoke(k2TapAction, k2TapValue)
                                     } else {
                                         onKeyPress(k2TapValue)
@@ -767,7 +768,8 @@ fun KeyboardLayout(
                             } else null
                             val k4OnClick: () -> Unit = remember(k4TapAction, k4TapValue, onKeyPress, onGestureAction) {
                                 {
-                                    if (k4TapAction != null && k4TapAction != GestureAction.COMMIT) {
+                                    // SEND_RIME（tap 默认语义）与 COMMIT 同等走敲键路由，保持与旧配置行为一致
+                                    if (k4TapAction != null && k4TapAction != GestureAction.COMMIT && k4TapAction != GestureAction.SEND_RIME) {
                                         onGestureAction?.invoke(k4TapAction, k4TapValue)
                                     } else {
                                         onKeyPress(k4TapValue)
@@ -1435,7 +1437,8 @@ private fun LandscapeKeyboardContent(
                         SwipeableKeyButtonLandscape(
                             text = k2Tap,
                             onClick = {
-                                if (k2Action != null && k2Action != GestureAction.COMMIT) {
+                                // SEND_RIME（tap 默认语义）与 COMMIT 同等走敲键路由，保持与旧配置行为一致
+                                if (k2Action != null && k2Action != GestureAction.COMMIT && k2Action != GestureAction.SEND_RIME) {
                                     onGestureAction?.invoke(k2Action, k2Tap)
                                 } else {
                                     onKeyPress(k2Tap)
@@ -1625,7 +1628,8 @@ private fun LandscapeKeyboardContent(
                     IconKeyButton(
                         icon = rememberVectorPainter(Icons.Default.Language),
                         onClick = {
-                            if (k4Action != null && k4Action != GestureAction.COMMIT) {
+                            // SEND_RIME（tap 默认语义）与 COMMIT 同等走敲键路由，保持与旧配置行为一致
+                            if (k4Action != null && k4Action != GestureAction.COMMIT && k4Action != GestureAction.SEND_RIME) {
                                 onGestureAction?.invoke(k4Action, k4Value)
                             } else {
                                 onKeyPress(k4Value)
@@ -1647,7 +1651,8 @@ private fun LandscapeKeyboardContent(
                     SwipeableKeyButtonLandscape(
                         text = k4Label,
                         onClick = {
-                            if (k4Action != null && k4Action != GestureAction.COMMIT) {
+                            // SEND_RIME（tap 默认语义）与 COMMIT 同等走敲键路由，保持与旧配置行为一致
+                            if (k4Action != null && k4Action != GestureAction.COMMIT && k4Action != GestureAction.SEND_RIME) {
                                 onGestureAction?.invoke(k4Action, k4Value)
                             } else {
                                 onKeyPress(k4Value)

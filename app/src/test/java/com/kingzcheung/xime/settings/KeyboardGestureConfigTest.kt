@@ -11,14 +11,25 @@ import org.junit.Test
 class KeyboardGestureConfigTest {
 
     @Test
-    fun `gestureDef 字符串简写解析为 commit 动作`() {
+    fun `tap 字符串简写默认为 send_rime（走按键路由进 rime，与实际执行一致）`() {
         val keys = parseKeys("""
             q: { tap: "q" }
         """.trimIndent())
         val kc = keys["q"]!!
         assertEquals("q", kc.tap!!.label)
-        assertEquals(GestureAction.COMMIT, kc.tap!!.action)
+        assertEquals(GestureAction.SEND_RIME, kc.tap!!.action)
         assertEquals("q", kc.tap!!.value)
+    }
+
+    @Test
+    fun `tap 对象格式省略 action 时默认为 send_rime（内置 k2 逗号键即此形式）`() {
+        val keys = parseKeys("""
+            "'":
+              tap: { label: "，", value: "," }
+        """.trimIndent())
+        val tap = keys["'"]!!.tap!!
+        assertEquals(GestureAction.SEND_RIME, tap.action)
+        assertEquals(",", tap.value)
     }
 
     @Test
@@ -28,9 +39,11 @@ class KeyboardGestureConfigTest {
         """.trimIndent())
         val kc = keys["a"]!!
         assertEquals("!", kc.swipeUp!!.label)
+        // swipe/swipe_down 简写保持 commit 默认（输出 value，直接上屏路径）
         assertEquals(GestureAction.COMMIT, kc.swipeUp!!.action)
         assertEquals("!", kc.swipeUp!!.value)
         assertEquals("A", kc.swipeDown!!.label)
+        assertEquals(GestureAction.COMMIT, kc.swipeDown!!.action)
     }
 
     @Test
@@ -42,6 +55,18 @@ class KeyboardGestureConfigTest {
         val su = keys["c"]!!.swipeUp!!
         assertEquals("复制", su.label)
         assertEquals(GestureAction.COPY, su.action)
+    }
+
+    @Test
+    fun `gestureDef 对象格式指定 action 为 send_rime`() {
+        val keys = parseKeys("""
+            q:
+              swipe_down: { label: "q", action: "send_rime", value: "q" }
+        """.trimIndent())
+        val sd = keys["q"]!!.swipeDown!!
+        assertEquals("q", sd.label)
+        assertEquals(GestureAction.SEND_RIME, sd.action)
+        assertEquals("q", sd.value)
     }
 
     @Test
@@ -414,6 +439,35 @@ class KeyboardGestureConfigTest {
         }
     }
 
+    @Test
+    fun `swipeHandlerFor 各动作的分发路径`() {
+        var committed: String? = null
+        var gestureAction: GestureAction? = null
+        val handler = { def: GestureDef ->
+            swipeHandlerFor(
+                def,
+                onCommitText = { committed = it },
+                onGestureAction = { action, _ -> gestureAction = action },
+            )
+        }
+        // COMMIT → 直接上屏路径
+        handler(GestureDef(label = "！", action = GestureAction.COMMIT, value = "!"))!!()
+        assertEquals("!", committed)
+        // SEND_RIME（显式配置在 swipe 上）→ 动作分发路径（进 rime 路由）
+        handler(GestureDef(label = "a", action = GestureAction.SEND_RIME, value = "a"))!!()
+        assertEquals(GestureAction.SEND_RIME, gestureAction)
+        // NONE → 未绑定
+        assertNull(handler(GestureDef(label = "字根", action = GestureAction.NONE)))
+        // def 为 null → 未绑定
+        assertNull(
+            swipeHandlerFor(
+                null,
+                onCommitText = { committed = it },
+                onGestureAction = { action, _ -> gestureAction = action },
+            )
+        )
+    }
+
     // ── 辅助 ──
 
     private fun parseKeys(yamlFragment: String): Map<String, KeyGestureConfig> {
@@ -438,7 +492,7 @@ class KeyboardGestureConfigTest {
         for ((kNode, vNode) in map.entries) {
             val name = (kNode as com.charleskorn.kaml.YamlScalar).content
             when (name) {
-                "tap" -> tap = parseGestureNode(vNode)
+                "tap" -> tap = parseGestureNode(vNode, GestureAction.SEND_RIME)
                 "swipe_up" -> swipeUp = parseGestureNode(vNode)
                 "swipe_down" -> swipeDown = parseGestureNode(vNode)
                 "long_press" -> longPress = parseLongPress(vNode)
@@ -467,16 +521,22 @@ class KeyboardGestureConfigTest {
         return null
     }
 
-    private fun parseGestureNode(node: com.charleskorn.kaml.YamlNode): GestureDef {
+    // 镜像 KeysConfigHelper.parseGestureNode（顶层 private 无法直接调用，
+    // 实现变更时需同步此副本）：defaultAction 为槽位语义默认，
+    // tap → SEND_RIME（走按键路由进 rime），swipe/long_press → COMMIT（直接上屏）
+    private fun parseGestureNode(
+        node: com.charleskorn.kaml.YamlNode,
+        defaultAction: GestureAction = GestureAction.COMMIT,
+    ): GestureDef {
         if (node is com.charleskorn.kaml.YamlScalar) {
             val text = node.content
             val icon = if (text.startsWith("@")) text.removePrefix("@") else ""
             val cleanLabel = if (icon.isNotEmpty()) "" else text
-            return GestureDef(label = cleanLabel, action = GestureAction.COMMIT, value = text, icon = icon)
+            return GestureDef(label = cleanLabel, action = defaultAction, value = text, icon = icon)
         }
         if (node is com.charleskorn.kaml.YamlMap) {
             var label = ""
-            var action: GestureAction? = GestureAction.COMMIT
+            var action: GestureAction? = defaultAction
             var value = ""
             var display = "both"
             for ((k, v) in node.entries) {

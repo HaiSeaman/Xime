@@ -63,6 +63,20 @@ enum class GestureAction(val value: String) {
         }
     },
 
+    /**
+     * 提交给 rime 引擎：value 作为按键输入走引擎组合路径（与物理键盘敲键同一条
+     * 路由，中文模式下字母进拼音组合、由候选选词上屏），不直接上屏。
+     * tap 槽位省略 action 时的默认语义（tap 实际执行本就走按键路由）；
+     * 也可显式配置在 swipe/长按上，与 [COMMIT]（即选即上屏）相对。
+     * 键盘分发层将 tap 上的 SEND_RIME 与 COMMIT 同等处理（均走 onKeyPress），
+     * 与旧配置行为完全一致。
+     */
+    SEND_RIME("send_rime") {
+        override fun execute(context: ActionExecutor, value: String) {
+            context.dispatchKey(value)
+        }
+    },
+
     /** 执行内置命令，value 为命令名（如 "clear_composition"）。 */
     COMMAND("command") {
         override fun execute(context: ActionExecutor, value: String) {
