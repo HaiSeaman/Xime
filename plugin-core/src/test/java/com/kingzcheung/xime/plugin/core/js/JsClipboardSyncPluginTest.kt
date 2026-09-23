@@ -1,11 +1,17 @@
 package com.kingzcheung.xime.plugin.core.js
 
+import android.app.Application
+import com.kingzcheung.xime.plugin.core.api.ClipboardProfile
 import com.kingzcheung.xime.plugin.core.config.PluginConfigStore
 import com.kingzcheung.xime.plugin.core.js.crypto.CryptoHostApi
 import com.kingzcheung.xime.plugin.core.js.http.HttpHostApi
 import com.kingzcheung.xime.plugin.core.js.http.HttpResponse
 import com.kingzcheung.xime.plugin.core.js.sdk.JsHostApi
+import com.kingzcheung.xime.plugin.core.model.PluginContext
+import com.kingzcheung.xime.plugin.core.model.PluginInfo
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -89,10 +95,11 @@ class JsClipboardSyncPluginTest {
         )
     }
 
-    private fun newRuntime(store: PluginConfigStore, http: MockHttpHostApi): JsScriptRuntime {
+    private fun newAdapter(store: PluginConfigStore, http: MockHttpHostApi): JsClipboardSyncPluginAdapter {
+        val dir = writePlugin()
         val runtime = JsScriptRuntime(
             "js-ximed-clipboard-sync",
-            writePlugin(),
+            dir,
             "main.js",
             store,
             hostApi = DebugHostApi(store),
@@ -100,23 +107,23 @@ class JsClipboardSyncPluginTest {
             cryptoHostApi = MockCryptoHostApi()
         )
         assertTrue("main.js 应能加载", runtime.load())
-        return runtime
+        val info = PluginInfo(
+            id = "com.kingzcheung.xime.plugin.ximed_clipboard_sync", name = "ximed 剪贴板同步",
+            description = "测试", iconResId = 0, versionCode = 1, versionName = "1.0.0",
+            path = File(dir, "main.js").absolutePath, type = "clipboard_sync"
+        )
+        return JsClipboardSyncPluginAdapter(
+            runtime, PluginContext(application = Application(), pluginInfo = info, configStore = store)
+        )
     }
-
-    private fun profileMap(text: String, hash: String): Map<String, Any?> = mapOf(
-        "type" to "text",
-        "hash" to hash,
-        "text" to text,
-        "has_data" to false,
-        "size" to text.length.toDouble()
-    )
 
     @Test
     fun `main js loads and exposes sync contract`() {
-        val runtime = newRuntime(InMemoryConfigStore(), MockHttpHostApi())
-        val schema = runtime.call("getSettingsSchema") as? List<*>
-        assertTrue("应导出 getSettingsSchema", schema != null)
-        assertEquals(4, schema?.size)
+        val store = InMemoryConfigStore()
+        val adapter = newAdapter(store, MockHttpHostApi())
+        val schema = adapter.getSettingsSchema()
+        assertTrue("应导出 settings.schema", schema.isNotEmpty())
+        assertEquals(4, schema.size)
     }
 
     @Test
@@ -127,11 +134,11 @@ class JsClipboardSyncPluginTest {
         store.set("password", "secret")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(200))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val ok = runtime.call("push", profileMap("hello", "abc")) as? Boolean
+        val ok = runBlocking { adapter.push(ClipboardProfile(text = "hello", hash = "abc", size = 5)) }
 
-        assertTrue("push 应成功", ok == true)
+        assertTrue("push 应成功", ok)
         assertEquals(1, http.requests.size)
         val (method, url, headers) = http.requests[0]
         assertEquals("PUT", method)
@@ -148,14 +155,14 @@ class JsClipboardSyncPluginTest {
         val http = MockHttpHostApi()
         val profileJson = """{"type":"text","hash":"abc123","text":"远端内容","has_data":false,"data_name":null,"size":12,"source":"desktop"}"""
         http.responseQueue.addLast(HttpResponse(200, mapOf("ETag" to "etag-1"), profileJson.toByteArray()))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val result = runtime.call("pull")
+        val profile = runBlocking { adapter.pull() }
 
-        val map = (result as? Map<*, *>)
-        assertTrue("pull 应返回对象", map != null)
-        assertEquals("远端内容", map?.get("text")?.toString())
-        assertEquals("abc123", map?.get("hash")?.toString())
+        assertNotNull("pull 应返回对象", profile)
+        assertEquals("远端内容", profile?.text)
+        assertEquals("abc123", profile?.hash)
+        assertEquals("desktop", profile?.source)
         assertEquals("etag-1", store.get("lastEtag"))
     }
 
@@ -166,9 +173,9 @@ class JsClipboardSyncPluginTest {
         store.set("lastEtag", "etag-1")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(304))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val result = runtime.call("pull")
+        val result = runBlocking { adapter.pull() }
 
         assertNull("304 应返回 null", result)
         assertEquals(1, http.requests.size)
@@ -182,17 +189,17 @@ class JsClipboardSyncPluginTest {
         store.set("serverUrl", "https://192.168.1.50:8080")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(401))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val error = runtime.call("testConnection")?.toString()
+        val error = runBlocking { adapter.testConnection() }
 
         assertTrue("应报告认证失败: $error", error.orEmpty().contains("认证失败"))
     }
 
     @Test
     fun `testConnection reports missing config`() {
-        val runtime = newRuntime(InMemoryConfigStore(), MockHttpHostApi())
-        val error = runtime.call("testConnection")?.toString()
+        val adapter = newAdapter(InMemoryConfigStore(), MockHttpHostApi())
+        val error = runBlocking { adapter.testConnection() }
         assertTrue("未配置时应报告错误: $error", error.orEmpty().contains("未配置"))
     }
 

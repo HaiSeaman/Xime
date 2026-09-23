@@ -16,8 +16,10 @@ import java.io.File
 import java.util.zip.GZIPOutputStream
 
 /**
- * 验证 volc-asr JS 版：火山 bigmodel_async 二进制协议（gzip + 帧头/序列号）全部在 JS 承载，
+ * 验证 volc-asr JS 版（v3）：火山 bigmodel_async 二进制协议（gzip + 帧头/序列号）全部在 JS 承载，
  * 宿主仅提供 host.ws（onBinary 回调槽）与 host.zlib / host.bin 原语。
+ *
+ * v3 契约：宿主调用路径为 speech.*（start/feed/stop/cancel/isConfigured）+ settings.schema。
  *
  * 迁移要点：JS 从 WS 二进制回调收到 frame（Uint8Array），取子段时要先复制成独立
  * Uint8Array（new Uint8Array(frame.subarray(...))）再交给 host.zlib.gunzip——
@@ -143,10 +145,10 @@ class JsVolcAsrPluginTest {
         try {
             assertTrue("main.js 应能加载", runtime.load())
 
-            assertTrue("未配置时不就绪", runtime.call("isConfigured") != true)
+            assertTrue("未配置时不就绪", runtime.call("speech.isConfigured") != true)
 
             // 设置 schema 非空（插件中心渲染表单的前提）
-            val schema = (runtime.call("getSettingsSchema") as? List<*>) ?: emptyList<Any?>()
+            val schema = (runtime.call("settings.schema") as? List<*>) ?: emptyList<Any?>()
             val schemaFields = schema.map { it as Map<*, *> }
             assertTrue("getSettingsSchema 应非空", schema.isNotEmpty())
             val schemaKeys = schemaFields.mapNotNull { it["key"]?.toString() }
@@ -161,13 +163,13 @@ class JsVolcAsrPluginTest {
             runtime.asrResultCallback = collector
 
             // 未配置 → start 失败并 emitError
-            assertTrue("start 应失败（未配置）", runtime.call("start") != true)
+            assertFalse("start 应失败（未配置）", runtime.callAsync("speech.start") == true)
             awaitUntil { collector.error != null }
             assertEquals("未配置 API Key，请在插件设置中填写", collector.error)
 
             // 配置后 start → 连接 openspeech 域名，带鉴权头
             store.set("apiKey", "test-api-key")
-            assertTrue("start 应成功", runtime.call("start") == true)
+            assertTrue("start 应成功", runtime.callAsync("speech.start") == true)
             assertTrue("连接地址应为火山域名", mock.connectedUrl?.contains("openspeech.bytedance.com") == true)
             assertEquals("test-api-key", mock.connectedHeaders["X-Api-Key"])
             assertEquals("volc.seedasr.sauc.duration", mock.connectedHeaders["X-Api-Resource-Id"])
@@ -191,7 +193,7 @@ class JsVolcAsrPluginTest {
             assertTrue("full request 含音频格式", fullJson.contains("\"rate\":16000"))
 
             // audioReady 后音频直发（0x2, POS_SEQUENCE, raw, gzip）
-            runtime.call("processAudioChunk", byteArrayOf(1, 2, 3, 4))
+            runtime.callAsync("speech.feed", byteArrayOf(1, 2, 3, 4))
             assertEquals("audioReady 后直发音频帧", 2, mock.sentBinaries.size)
             val audio = mock.sentBinaries[1]
             assertEquals("音频帧消息类型 0x2", (0x2 shl 4) or 0x1, audio[1].toInt() and 0xFF)
@@ -221,7 +223,7 @@ class JsVolcAsrPluginTest {
             // stop → 发送最后一包标记（flags=0x3 NEG_WITH_SEQUENCE，seq 取负）
             mock.hostListener?.onOpen()
             mock.sentBinaries.clear()
-            runtime.call("stop")
+            runtime.callAsync("speech.stop")
             awaitUntil { mock.sentBinaries.isNotEmpty() }
             val last = mock.sentBinaries.last()
             assertEquals("最后一包 flags=0x3", (0x2 shl 4) or 0x3, last[1].toInt() and 0xFF)

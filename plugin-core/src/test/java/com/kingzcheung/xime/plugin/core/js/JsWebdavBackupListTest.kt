@@ -1,10 +1,14 @@
 package com.kingzcheung.xime.plugin.core.js
 
+import android.app.Application
 import com.kingzcheung.xime.plugin.core.config.PluginConfigStore
 import com.kingzcheung.xime.plugin.core.js.crypto.CryptoHostApi
 import com.kingzcheung.xime.plugin.core.js.http.HttpHostApi
 import com.kingzcheung.xime.plugin.core.js.http.HttpResponse
 import com.kingzcheung.xime.plugin.core.js.sdk.JsHostApi
+import com.kingzcheung.xime.plugin.core.model.PluginContext
+import com.kingzcheung.xime.plugin.core.model.PluginInfo
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -114,7 +118,7 @@ class JsWebdavBackupListTest {
         )
     }
 
-    private fun loadPlugin(): Pair<JsScriptRuntime, MockHttpHostApi> {
+    private fun loadPlugin(): Pair<JsBackupPluginAdapter, MockHttpHostApi> {
         val dir = writePlugin()
         val store = InMemoryConfigStore()
         store.set("url", "https://dav.jianguoyun.com/dav/")
@@ -135,26 +139,34 @@ class JsWebdavBackupListTest {
             cryptoHostApi = MockCryptoHostApi()
         )
         assertTrue("main.js 应能加载", runtime.load())
-        return runtime to http
+        val info = PluginInfo(
+            id = "com.kingzcheung.xime.plugin.webdav_backup", name = "WebDAV 备份",
+            description = "测试", iconResId = 0, versionCode = 1, versionName = "2.0.0",
+            path = File(dir, "main.js").absolutePath, type = "backup"
+        )
+        val adapter = JsBackupPluginAdapter(
+            runtime, PluginContext(application = Application(), pluginInfo = info, configStore = store)
+        )
+        return adapter to http
     }
 
     @Test
     fun `listBackups parses jianguoyun 207 response`() {
-        val (runtime, http) = loadPlugin()
+        val (adapter, http) = loadPlugin()
         try {
-            val items = runtime.call("listBackups") as? List<*>
+            val items = runBlocking { adapter.listBackups() }
 
             assertEquals(1, items?.size)
-            val item = items?.first() as? Map<*, *>
-            assertEquals("Xime配置-2026-09-06.zip", item?.get("name")?.toString())
-            assertEquals("/dav/xime_backup/Xime配置-2026-09-06.zip", item?.get("id")?.toString())
-            assertEquals(5598773L, (item?.get("size") as? Number)?.toLong())
-            assertTrue("createdAt 应 > 0", (item?.get("createdAt") as? Number)?.toLong() ?: 0 > 0)
+            val item = items?.first()
+            assertEquals("Xime配置-2026-09-06.zip", item?.name)
+            assertEquals("/dav/xime_backup/Xime配置-2026-09-06.zip", item?.id)
+            assertEquals(5598773L, item?.size)
+            assertTrue("createdAt 应 > 0", (item?.createdAt ?: 0) > 0)
             // PROPFIND 打到了带 /dav 前缀的正确地址
             assertEquals("PROPFIND", http.requests[0].first)
             assertEquals("https://dav.jianguoyun.com/dav/xime_backup", http.requests[0].second)
         } finally {
-            runtime.close()
+            adapter.onUnload()
         }
     }
 }

@@ -1,12 +1,18 @@
 package com.kingzcheung.xime.plugin.core.js
 
+import android.app.Application
+import com.kingzcheung.xime.plugin.core.api.ClipboardProfile
 import com.kingzcheung.xime.plugin.core.config.PluginConfigStore
 import com.kingzcheung.xime.plugin.core.js.crypto.CryptoHostApi
 import com.kingzcheung.xime.plugin.core.js.http.HttpHostApi
 import com.kingzcheung.xime.plugin.core.js.http.HttpResponse
 import com.kingzcheung.xime.plugin.core.js.sdk.JsHostApi
+import com.kingzcheung.xime.plugin.core.model.PluginContext
+import com.kingzcheung.xime.plugin.core.model.PluginInfo
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -92,10 +98,11 @@ class JsWebdavClipboardSyncPluginTest {
         )
     }
 
-    private fun newRuntime(store: PluginConfigStore, http: MockHttpHostApi): JsScriptRuntime {
+    private fun newAdapter(store: PluginConfigStore, http: MockHttpHostApi): JsClipboardSyncPluginAdapter {
+        val dir = writePlugin()
         val runtime = JsScriptRuntime(
             "js-webdav-clipboard-sync",
-            writePlugin(),
+            dir,
             "main.js",
             store,
             hostApi = DebugHostApi(store),
@@ -103,23 +110,23 @@ class JsWebdavClipboardSyncPluginTest {
             cryptoHostApi = MockCryptoHostApi()
         )
         assertTrue("main.js 应能加载", runtime.load())
-        return runtime
+        val info = PluginInfo(
+            id = "com.kingzcheung.xime.plugin.webdav_clipboard_sync", name = "WebDAV 剪贴板同步",
+            description = "测试", iconResId = 0, versionCode = 1, versionName = "1.0.0",
+            path = File(dir, "main.js").absolutePath, type = "clipboard_sync"
+        )
+        return JsClipboardSyncPluginAdapter(
+            runtime, PluginContext(application = Application(), pluginInfo = info, configStore = store)
+        )
     }
-
-    private fun profileMap(text: String, hash: String): Map<String, Any?> = mapOf(
-        "type" to "text",
-        "hash" to hash,
-        "text" to text,
-        "has_data" to false,
-        "size" to text.length.toDouble()
-    )
 
     @Test
     fun `main js loads and exposes sync contract`() {
-        val runtime = newRuntime(InMemoryConfigStore(), MockHttpHostApi())
-        val schema = runtime.call("getSettingsSchema") as? List<*>
-        assertTrue("应导出 getSettingsSchema", schema != null)
-        assertEquals(5, schema?.size)
+        val store = InMemoryConfigStore()
+        val adapter = newAdapter(store, MockHttpHostApi())
+        val schema = adapter.getSettingsSchema()
+        assertTrue("应导出 settings.schema", schema.isNotEmpty())
+        assertEquals(5, schema.size)
     }
 
     @Test
@@ -130,11 +137,11 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("password", "secret")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(201))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val ok = runtime.call("push", profileMap("hello", "abc")) as? Boolean
+        val ok = runBlocking { adapter.push(ClipboardProfile(text = "hello", hash = "abc", size = 5)) }
 
-        assertTrue("push 应成功", ok == true)
+        assertTrue("push 应成功", ok)
         assertEquals(1, http.requests.size)
         val (method, url, headers) = http.requests[0]
         assertEquals("PUT", method)
@@ -154,11 +161,11 @@ class JsWebdavClipboardSyncPluginTest {
         http.responseQueue.addLast(HttpResponse(405))
         http.responseQueue.addLast(HttpResponse(201))
         http.responseQueue.addLast(HttpResponse(201))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val ok = runtime.call("push", profileMap("hello", "abc")) as? Boolean
+        val ok = runBlocking { adapter.push(ClipboardProfile(text = "hello", hash = "abc", size = 5)) }
 
-        assertTrue("push 应成功", ok == true)
+        assertTrue("push 应成功", ok)
         assertEquals(4, http.requests.size)
         val methods = http.requests.map { it.first }
         assertEquals(listOf("PUT", "MKCOL", "MKCOL", "PUT"), methods)
@@ -182,11 +189,11 @@ class JsWebdavClipboardSyncPluginTest {
         http.responseQueue.addLast(HttpResponse(405))
         http.responseQueue.addLast(HttpResponse(201))
         http.responseQueue.addLast(HttpResponse(201))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val ok = runtime.call("push", profileMap("hello", "abc")) as? Boolean
+        val ok = runBlocking { adapter.push(ClipboardProfile(text = "hello", hash = "abc", size = 5)) }
 
-        assertTrue("push 应成功", ok == true)
+        assertTrue("push 应成功", ok)
         val methods = http.requests.map { it.first }
         assertEquals(listOf("PUT", "MKCOL", "MKCOL", "PUT"), methods)
     }
@@ -198,11 +205,11 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("remotePath", "xime")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(201))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val ok = runtime.call("push", profileMap("hello", "abc")) as? Boolean
+        val ok = runBlocking { adapter.push(ClipboardProfile(text = "hello", hash = "abc", size = 5)) }
 
-        assertTrue("push 应成功", ok == true)
+        assertTrue("push 应成功", ok)
         assertEquals(1, http.requests.size)
         val (method, url) = http.requests[0]
         assertEquals("PUT", method)
@@ -215,11 +222,11 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("davUrl", "https://192.168.1.50:8080/dav/")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(201))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val ok = runtime.call("push", profileMap("hello", "abc")) as? Boolean
+        val ok = runBlocking { adapter.push(ClipboardProfile(text = "hello", hash = "abc", size = 5)) }
 
-        assertTrue("push 应成功", ok == true)
+        assertTrue("push 应成功", ok)
         val body = http.requestBodies[0]
         assertTrue("body 应为 JSON", body.startsWith("{"))
         assertTrue("body 应含 text", body.contains("\"hello\""))
@@ -235,15 +242,14 @@ class JsWebdavClipboardSyncPluginTest {
         http.responseQueue.addLast(
             HttpResponse(200, mapOf("ETag" to "webdav-etag-1"), profileJson.toByteArray())
         )
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val result = runtime.call("pull")
+        val profile = runBlocking { adapter.pull() }
 
-        val map = (result as? Map<*, *>)
-        assertTrue("pull 应返回对象", map != null)
-        assertEquals("远端内容", map?.get("text")?.toString())
-        assertEquals("abc123", map?.get("hash")?.toString())
-        assertEquals("desktop", map?.get("source")?.toString())
+        assertNotNull("pull 应返回对象", profile)
+        assertEquals("远端内容", profile?.text)
+        assertEquals("abc123", profile?.hash)
+        assertEquals("desktop", profile?.source)
         assertEquals("webdav-etag-1", store.get("lastEtag"))
     }
 
@@ -253,13 +259,12 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("davUrl", "https://192.168.1.50:8080/dav/")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(200, mapOf("ETag" to "etag-2"), "旧版纯文本".toByteArray()))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val result = runtime.call("pull")
+        val profile = runBlocking { adapter.pull() }
 
-        val map = (result as? Map<*, *>)
-        assertTrue("pull 应返回对象", map != null)
-        assertEquals("旧版纯文本", map?.get("text")?.toString())
+        assertNotNull("pull 应返回对象", profile)
+        assertEquals("旧版纯文本", profile?.text)
     }
 
     @Test
@@ -269,9 +274,9 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("lastEtag", "webdav-etag-1")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(304))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val result = runtime.call("pull")
+        val result = runBlocking { adapter.pull() }
 
         assertNull("304 应返回 null", result)
         assertEquals(1, http.requests.size)
@@ -285,9 +290,9 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("davUrl", "https://192.168.1.50:8080/dav/")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(404))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val result = runtime.call("pull")
+        val result = runBlocking { adapter.pull() }
 
         assertNull("404 应返回 null", result)
     }
@@ -298,9 +303,9 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("davUrl", "https://192.168.1.50:8080/dav/")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(207))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val error = runtime.call("testConnection")?.toString()
+        val error = runBlocking { adapter.testConnection() }
 
         assertFalse("207 视为连接成功: $error", error.orEmpty().contains("失败"))
         assertEquals(1, http.requests.size)
@@ -316,17 +321,17 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("davUrl", "https://192.168.1.50:8080/dav/")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(401))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val error = runtime.call("testConnection")?.toString()
+        val error = runBlocking { adapter.testConnection() }
 
         assertTrue("应报告认证失败: $error", error.orEmpty().contains("认证失败"))
     }
 
     @Test
     fun `testConnection reports missing config`() {
-        val runtime = newRuntime(InMemoryConfigStore(), MockHttpHostApi())
-        val error = runtime.call("testConnection")?.toString()
+        val adapter = newAdapter(InMemoryConfigStore(), MockHttpHostApi())
+        val error = runBlocking { adapter.testConnection() }
         assertTrue("未配置时应报告错误: $error", error.orEmpty().contains("未配置"))
     }
 
@@ -336,24 +341,24 @@ class JsWebdavClipboardSyncPluginTest {
         store.set("davUrl", "https://192.168.1.50:8080/dav/")
         val http = MockHttpHostApi()
         http.responseQueue.addLast(HttpResponse(404))
-        val runtime = newRuntime(store, http)
+        val adapter = newAdapter(store, http)
 
-        val error = runtime.call("testConnection")?.toString()
+        val error = runBlocking { adapter.testConnection() }
 
         assertFalse("404 视为连接成功", error.orEmpty().contains("失败"))
     }
 
     @Test
     fun `push returns false when url not configured`() {
-        val runtime = newRuntime(InMemoryConfigStore(), MockHttpHostApi())
-        val ok = runtime.call("push", profileMap("hello", "abc")) as? Boolean
-        assertFalse("未配置时应失败", ok == true)
+        val adapter = newAdapter(InMemoryConfigStore(), MockHttpHostApi())
+        val ok = runBlocking { adapter.push(ClipboardProfile(text = "hello", hash = "abc", size = 5)) }
+        assertFalse("未配置时应失败", ok)
     }
 
     @Test
     fun `pull returns null when url not configured`() {
-        val runtime = newRuntime(InMemoryConfigStore(), MockHttpHostApi())
-        val result = runtime.call("pull")
+        val adapter = newAdapter(InMemoryConfigStore(), MockHttpHostApi())
+        val result = runBlocking { adapter.pull() }
         assertNull("未配置时应返回 null", result)
     }
 }

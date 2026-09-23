@@ -15,9 +15,9 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * 验证宿主 SSE 流式原语在 JS 侧的注入与桥接：
- * - host.http.stream 发起会话（URL/headers 透传、返回值即会话 id）
- * - 流事件（onData/onDone/onError）投递到导出对象的回调槽 plugin.onSseData/onSseDone/onSseError
+ * 验证宿主 SSE 流式原语在 JS 侧的注入与桥接（v3 TS 范式：async）：
+ * - host.http.stream 发起会话（await；URL/headers 透传，resolve 会话 id）
+ * - 流事件（onData/onDone/onError）投递到导出对象的回调槽 plugin.sse.onData/onSseDone/onSseError
  * - host.http.closeStream 主动关停会话
  * - host.http.request 透传 timeoutMillis
  */
@@ -94,8 +94,8 @@ class JsSseHostTest {
               errorMsg: "",
               sid: -1,
 
-              open_stream: function() {
-                this.sid = host.http.stream("https://api.example.com/v1/chat/completions", {
+              open_stream: async function() {
+                this.sid = await host.http.stream("https://api.example.com/v1/chat/completions", {
                   Authorization: "Bearer test-key",
                   "Content-Type": "application/json",
                   Accept: "text/event-stream"
@@ -107,17 +107,19 @@ class JsSseHostTest {
               get_done: function() { return this.doneText; },
               get_error: function() { return this.errorMsg; },
 
-              close_stream: function() { host.http.closeStream(this.sid); },
+              close_stream: async function() { await host.http.closeStream(this.sid); },
 
-              sync_request: function() {
+              sync_request: async function() {
                 return host.http.request("POST", "https://api.example.com/v1/chat", {
                   "Content-Type": "application/json"
                 }, "{}", 120000);
               },
 
-              onSseData: function(sessionId, text) { this.received.push(text); },
-              onSseDone: function(sessionId, fullText) { this.doneText = fullText; },
-              onSseError: function(sessionId, message) { this.errorMsg = message; }
+              sse: {
+                onData: function(sessionId, text) { globalThis.plugin.received.push(text); },
+                onDone: function(sessionId, fullText) { globalThis.plugin.doneText = fullText; },
+                onError: function(sessionId, message) { globalThis.plugin.errorMsg = message; }
+              }
             }
             """.trimIndent()
         )
@@ -138,7 +140,7 @@ class JsSseHostTest {
         try {
             assertTrue(runtime.load())
 
-            val sid = (runtime.call("open_stream") as? Number)?.toInt()
+            val sid = (runtime.callAsync("open_stream") as? Number)?.toInt()
             assertEquals("会话 id 透传", 100, sid)
             assertEquals("URL 透传", "https://api.example.com/v1/chat/completions", sse.connectedUrl)
             assertEquals("Authorization 透传", "Bearer test-key", sse.connectedHeaders["Authorization"])
@@ -148,18 +150,18 @@ class JsSseHostTest {
             sse.listener?.onData("你好")
             sse.listener?.onData("世界")
             val received = runtime.call("get_received") as? List<*>
-            assertEquals("onSseData 逐条累积", listOf("你好", "世界"), received)
+            assertEquals("onData 逐条累积", listOf("你好", "世界"), received)
 
             sse.listener?.onDone("你好世界")
             awaitUntil { runtime.call("get_done")?.toString() == "你好世界" }
-            assertEquals("onSseDone 交付拼接文本", "你好世界", runtime.call("get_done")?.toString())
+            assertEquals("onDone 交付拼接文本", "你好世界", runtime.call("get_done")?.toString())
 
             sse.listener?.onError("服务端限流")
             awaitUntil { runtime.call("get_error")?.toString() == "服务端限流" }
-            assertEquals("onSseError 交付错误", "服务端限流", runtime.call("get_error")?.toString())
+            assertEquals("onError 交付错误", "服务端限流", runtime.call("get_error")?.toString())
 
             // 主动关停
-            runtime.call("close_stream")
+            runtime.callAsync("close_stream")
             assertEquals("closeStream 携带会话 id", listOf(100), sse.closedIds)
         } finally {
             runtime.close()
@@ -167,12 +169,13 @@ class JsSseHostTest {
     }
 
     @Test
-    fun `stream 失败返回 -1`() {
+    fun `stream 失败时返回 null`() {
         val sse = MockSseHostApi().apply { returnId = -1 }
         val runtime = buildRuntime(sse, MockHttpHostApi())
         try {
             assertTrue(runtime.load())
-            assertEquals("失败返回 -1", -1, (runtime.call("open_stream") as? Number)?.toInt())
+            // v3：连接失败 throw XimeError（宿主吞并返回 null），不再同步返回 -1
+            assertNull("失败返回 null", runtime.callAsync("open_stream"))
         } finally {
             runtime.close()
         }
@@ -186,7 +189,7 @@ class JsSseHostTest {
             assertTrue(runtime.load())
 
             assertNull("未传 timeout 时为 null", http.lastTimeoutMillis)
-            runtime.call("sync_request")
+            runtime.callAsync("sync_request")
             assertEquals("timeoutMillis 透传", 120000, http.lastTimeoutMillis)
             assertEquals("URL 透传", "https://api.example.com/v1/chat", http.lastUrl)
         } finally {
@@ -201,8 +204,8 @@ class JsSseHostTest {
         File(dir, "main.js").writeText(
             """
             globalThis.plugin = {
-              open_no_cb: function() {
-                return host.http.stream("https://api.example.com/stream", {}, {});
+              open_no_cb: async function() {
+                return host.http.stream("https://api.example.com/stream", {});
               }
             }
             """.trimIndent()
@@ -230,7 +233,7 @@ class JsSseHostTest {
         )
         try {
             assertTrue(runtime.load())
-            val ret = runtime.call("open_no_cb")
+            val ret = runtime.callAsync("open_no_cb")
             assertEquals("无回调槽仍返回会话 id", 100, (ret as? Number)?.toInt())
 
             // 未定义回调槽时，宿主流事件不应崩溃

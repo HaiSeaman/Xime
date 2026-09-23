@@ -12,7 +12,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * 验证 tool 类型插件 JS 契约（getPanelState/onPanelInput/onPanelAction/onPanelItemClick）
+ * 验证 tool 类型插件 JS 契约（panel.state/onInput/onAction/onItemClick，v3）
  * 宿主侧解析结果正确。
  */
 class JsToolPluginAdapterTest {
@@ -53,14 +53,16 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              getPanelState: function(inputText) {
-                return {
-                  inputText: "预填:" + inputText,
-                  items: [
-                    { id: "1", text: "候选一" },
-                    { id: "2", text: "候选二" },
-                  ],
-                };
+              panel: {
+                state: function(input) {
+                  return {
+                    inputText: "预填:" + input.inputText,
+                    items: [
+                      { id: "1", text: "候选一" },
+                      { id: "2", text: "候选二" },
+                    ],
+                  };
+                }
               }
             }
             """.trimIndent()
@@ -108,16 +110,18 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              getPanelState: function(inputText) {
-                return {
-                  items: [
-                    { id: "1", text: "合规项" },
-                    { id: "", text: "空 id" },
-                    { text: "缺 id" },
-                    { id: "3", text: "" },
-                    "非对象元素",
-                  ],
-                };
+              panel: {
+                state: function(input) {
+                  return {
+                    items: [
+                      { id: "1", text: "合规项" },
+                      { id: "", text: "空 id" },
+                      { text: "缺 id" },
+                      { id: "3", text: "" },
+                      "非对象元素",
+                    ],
+                  };
+                }
               }
             }
             """.trimIndent()
@@ -134,14 +138,16 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              getPanelState: function(inputText) {
-                return {
-                  items: [
-                    { id: "a", text: "第一" },
-                    { id: "a", text: "重复 id" },
-                    { id: "b", text: "第二" },
-                  ],
-                };
+              panel: {
+                state: function(input) {
+                  return {
+                    items: [
+                      { id: "a", text: "第一" },
+                      { id: "a", text: "重复 id" },
+                      { id: "b", text: "第二" },
+                    ],
+                  };
+                }
               }
             }
             """.trimIndent()
@@ -171,14 +177,15 @@ class JsToolPluginAdapterTest {
               lastValue: "",
               lastAction: "",
               lastItem: "",
-              getPanelState: function() { return {}; },
-              onPanelInput: function(e) { this.lastKey = e.key; this.lastValue = e.value; },
-              onPanelAction: function(actionId) { this.lastAction = actionId; },
-              onPanelItemClick: function(itemId) { this.lastItem = itemId; },
               _lastKey: function() { return this.lastKey; },
               _lastValue: function() { return this.lastValue; },
               _lastAction: function() { return this.lastAction; },
-              _lastItem: function() { return this.lastItem; }
+              _lastItem: function() { return this.lastItem; },
+              panel: {
+                onInput: function(e) { globalThis.plugin.lastKey = e.key; globalThis.plugin.lastValue = e.value; },
+                onAction: async function(e) { globalThis.plugin.lastAction = e.actionId; },
+                onItemClick: function(e) { globalThis.plugin.lastItem = e.itemId; }
+              }
             }
             """.trimIndent()
         )
@@ -213,16 +220,18 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              getPanelState: function(inputText) {
-                return {
-                  ui: [
-                    { type: "section", label: "统计" },
-                    { type: "text", value: "说明", style: "caption" },
-                    { type: "metric", label: "字数", value: "100", unit: "字" },
-                    { type: "divider" },
-                    { type: "button", label: "清零", key: "reset" },
-                  ],
-                };
+              panel: {
+                state: function(input) {
+                  return {
+                    ui: [
+                      { type: "section", label: "统计" },
+                      { type: "text", value: "说明", style: "caption" },
+                      { type: "metric", label: "字数", value: "100", unit: "字" },
+                      { type: "divider" },
+                      { type: "button", label: "清零", key: "reset" },
+                    ],
+                  };
+                }
               }
             }
             """.trimIndent()
@@ -250,14 +259,16 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              getPanelState: function(inputText) {
-                return {
-                  ui: [
-                    { type: "section", title: "旧标题" },
-                    { type: "text", content: "旧文本", style: "caption" },
-                    { type: "action", label: "旧按钮", actionId: "old_action" },
-                  ],
-                };
+              panel: {
+                state: function(input) {
+                  return {
+                    ui: [
+                      { type: "section", title: "旧标题" },
+                      { type: "text", content: "旧文本", style: "caption" },
+                      { type: "action", label: "旧按钮", actionId: "old_action" },
+                    ],
+                  };
+                }
               }
             }
             """.trimIndent()
@@ -280,11 +291,13 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              getSettingsSchema: function() {
-                return [
-                  { key: "apiKey", label: "API Key", type: "secret" },
-                  { key: "testConnection", label: "测试连接", type: "button", action: "testConnection" },
-                ];
+              settings: {
+                schema: function() {
+                  return [
+                    { key: "apiKey", label: "API Key", type: "secret" },
+                    { key: "testConnection", label: "测试连接", type: "button", action: "testConnection" },
+                  ];
+                }
               }
             }
             """.trimIndent()
@@ -303,13 +316,15 @@ class JsToolPluginAdapterTest {
         val dir = writeScript(
             """
             globalThis.plugin = {
-              getPanelState: function(inputText) {
-                return {
-                  ui: [
-                    { type: "future_node", value: "未来节点" },
-                    { type: "section", label: "正常" },
-                  ],
-                };
+              panel: {
+                state: function(input) {
+                  return {
+                    ui: [
+                      { type: "future_node", value: "未来节点" },
+                      { type: "section", label: "正常" },
+                    ],
+                  };
+                }
               }
             }
             """.trimIndent()

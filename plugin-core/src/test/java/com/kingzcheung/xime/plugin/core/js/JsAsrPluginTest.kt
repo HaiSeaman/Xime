@@ -5,6 +5,7 @@ import com.kingzcheung.xime.plugin.core.config.PluginConfigStore
 import com.kingzcheung.xime.plugin.core.js.ws.WsHostApi
 import com.kingzcheung.xime.plugin.core.js.ws.WsHostListener
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -12,11 +13,11 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * 验证 funasr-asr JS 版：全部 ASR 逻辑（状态机/prebuffer/协议）在 JS，
+ * 验证 funasr-asr JS 版（v3）：全部 ASR 逻辑（状态机/prebuffer/协议）在 JS，
  * 宿主只提供通用 WebSocket 原语（mock 验证 JS 对 host.ws 的使用）。
  *
- * JS 与 Lua 的关键差异：host.ws.connect 不再传事件回调表，事件投递到
- * plugin 导出对象回调槽 plugin.onWsOpen/onWsMessage/onWsClose/onWsError。
+ * v3 契约：宿主调用路径为 speech.*（start/feed/stop/cancel/isConfigured）+ settings.schema；
+ * WS 事件投递到 plugin.ws.onOpen/onMessage/onClose/onError 回调槽。
  *
  * 测试与发布同源：载入 xipm build 产物 build/plugin-js/funasr-asr/main.js。
  */
@@ -103,21 +104,21 @@ class JsAsrPluginTest {
         try {
             assertTrue("main.js 应能加载", runtime.load())
 
-            val icon = runtime.call("getIcon") as? Map<*, *>
-            assertEquals("icon.png", icon?.get("assetName")?.toString())
-            assertTrue("未配置时不就绪", runtime.call("isConfigured") != true)
+            val schema = (runtime.call("settings.schema") as? List<*>) ?: emptyList<Any?>()
+            assertTrue("schema 应导出 apiKey 设置", (schema.map { (it as? Map<*, *>)?.get("key")?.toString() }).contains("apiKey"))
+            assertTrue("未配置时不就绪", runtime.call("speech.isConfigured") != true)
 
             val collector = ResultCollector()
             runtime.asrResultCallback = collector
 
             // 未配置 apiKey → start 失败并 emitError
-            assertTrue("start 应失败（未配置）", runtime.call("start") != true)
+            assertFalse("start 应失败（未配置）", runtime.callAsync("speech.start") == true)
             awaitUntil { collector.error != null }
             assertEquals("未配置 API Key，请在插件设置中填写", collector.error)
 
             // 配置后 start → JS 用 host.ws 发起连接
             store.set("apiKey", "test-key-123")
-            assertTrue("start 应成功", runtime.call("start") == true)
+            assertTrue("start 应成功", runtime.callAsync("speech.start") == true)
             assertTrue("连接地址应为 dashscope 白名单域名", mock.connectedUrl?.contains("dashscope.aliyuncs.com") == true)
             assertEquals("Bearer test-key-123", mock.connectedHeaders["Authorization"])
 
@@ -132,7 +133,7 @@ class JsAsrPluginTest {
             assertTrue("payload 含 sample_rate", runTask.contains("\"sample_rate\":16000"))
 
             // 音频提交给 JS：task-started 前缓冲（不经宿主直接发）
-            runtime.call("processAudioChunk", byteArrayOf(1, 2, 3, 4))
+            runtime.callAsync("speech.feed", byteArrayOf(1, 2, 3, 4))
             assertTrue("task-started 前不应直发音频", mock.sentBinaries.isEmpty())
 
             // task-started → JS 冲刷 prebuffer
@@ -143,7 +144,7 @@ class JsAsrPluginTest {
             assertEquals("task-started 后冲刷缓冲音频", 1, mock.sentBinaries.size)
 
             // 音频直发（audioReady）
-            runtime.call("processAudioChunk", byteArrayOf(5, 6, 7, 8))
+            runtime.callAsync("speech.feed", byteArrayOf(5, 6, 7, 8))
             assertEquals("audioReady 后直发", 2, mock.sentBinaries.size)
 
             // result-generated（partial / final）→ JS 解析并 emit
@@ -173,7 +174,7 @@ class JsAsrPluginTest {
             assertTrue("task-failed 应上报错误", (collector.error ?: "").contains("InvalidParameter"))
 
             // stop → JS 发 finish-task
-            runtime.call("stop")
+            runtime.callAsync("speech.stop")
             assertTrue("stop 发送 finish-task", mock.sentTexts.any { it.contains("\"action\":\"finish-task\"") })
         } finally {
             runtime.close()

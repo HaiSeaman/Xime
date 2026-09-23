@@ -108,7 +108,9 @@ class JsCandidateTransformTest {
         val rt = runtime(
             """
             globalThis.plugin = {
-              transformCandidates: function(req) { return null; }
+              transform: {
+                candidates: function(req) { return null; }
+              }
             }
             """.trimIndent()
         )
@@ -122,7 +124,9 @@ class JsCandidateTransformTest {
         val rt = runtime(
             """
             globalThis.plugin = {
-              transformCandidates: function(req) { return { candidates: [] }; }
+              transform: {
+                candidates: function(req) { return { candidates: [] }; }
+              }
             }
             """.trimIndent()
         )
@@ -136,7 +140,11 @@ class JsCandidateTransformTest {
         val rt = runtime(
             """
             globalThis.plugin = {
-              transformCandidates: function(req) { return { wrong_field: 1 }; }
+              transform: {
+                candidates: function(req) {
+                  return { wrong_field: 1 };
+                }
+              }
             }
             """.trimIndent()
         )
@@ -150,11 +158,13 @@ class JsCandidateTransformTest {
         val rt = runtime(
             """
             globalThis.plugin = {
-              transformCandidates: function(req) {
-                return { candidates: [
-                  { comment: '孤立注释' },
-                  { text: '有效' },
-                ] };
+              transform: {
+                candidates: function(req) {
+                  return { candidates: [
+                    { comment: '孤立注释' },
+                    { text: '有效' },
+                  ] };
+                }
               }
             }
             """.trimIndent()
@@ -171,11 +181,13 @@ class JsCandidateTransformTest {
         val rt = runtime(
             """
             globalThis.plugin = {
-              transformCandidates: function(req) {
-                return { candidates: [
-                  { text: '' },
-                  { text: '有效' },
-                ] };
+              transform: {
+                candidates: function(req) {
+                  return { candidates: [
+                    { text: '' },
+                    { text: '有效' },
+                  ] };
+                }
               }
             }
             """.trimIndent()
@@ -191,10 +203,12 @@ class JsCandidateTransformTest {
         val rt = runtime(
             """
             globalThis.plugin = {
-              transformCandidates: function(req) {
-                var out = [];
-                for (var i = 1; i <= 30; i++) { out.push({ text: 'c' + i }); }
-                return { candidates: out };
+              transform: {
+                candidates: function(req) {
+                  var out = [];
+                  for (var i = 1; i <= 30; i++) { out.push({ text: 'c' + i }); }
+                  return { candidates: out };
+                }
               }
             }
             """.trimIndent()
@@ -211,7 +225,9 @@ class JsCandidateTransformTest {
         val rt = runtime(
             """
             globalThis.plugin = {
-              transformCandidates: function(req) { throw new Error('boom'); }
+              transform: {
+                candidates: function(req) { throw new Error('boom'); }
+              }
             }
             """.trimIndent()
         )

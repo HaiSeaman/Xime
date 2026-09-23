@@ -23,7 +23,7 @@ import java.io.File
  * - ai-reply：同步 host.http.request 生成候选列表 → getPanelState 解析
  * - ai-write：host.http.stream 流式累积（事件投递到 plugin.onSseData/onSseDone 回调槽）
  *   → getPanelState 实时文本 → closeStream 中断
- * - ai-translate：SSE 流式翻译（POST + JSON body 透传）
+ * - qwen-translate：SSE 流式翻译（原名 ai-translate）（POST + JSON body 透传）
  *
  * 脚本统一从 `xipm build` 产物 `build/plugin-js/<name>/main.js` 载入，
  * 与发布包同源（先构建再跑测试）。
@@ -306,13 +306,13 @@ class JsAiPluginTest {
     }
 
     @Test
-    fun `ai-translate 流式翻译生成译文`() {
+    fun `qwen-translate 流式翻译生成译文`() {
         val store = aiStore()
         store.set("targetLang", "English")
         val sse = MockSseHostApi()
-        val dir = writePlugin("ai-translate")
+        val dir = writePlugin("qwen-translate")
         val runtime = JsScriptRuntime(
-            "com.kingzcheung.xime.plugin.ai_translate",
+            "com.kingzcheung.xime.plugin.qwen_translate",
             dir,
             "main.js",
             store,
@@ -320,7 +320,7 @@ class JsAiPluginTest {
         )
         try {
             assertTrue("main.js 应能加载", runtime.load())
-            val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_translate", runtime, store)
+            val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.qwen_translate", runtime, store)
 
             adapter.onPanelInput("", "你好世界")
             adapter.onPanelAction("generate")
@@ -351,15 +351,15 @@ class JsAiPluginTest {
     }
 
     @Test
-    fun `ai-translate 控件行与互换语言`() {
+    fun `qwen-translate 控件行与互换语言`() {
         val store = aiStore()
-        val dir = writePlugin("ai-translate")
+        val dir = writePlugin("qwen-translate")
         val runtime = JsScriptRuntime(
-            "com.kingzcheung.xime.plugin.ai_translate", dir, "main.js", store
+            "com.kingzcheung.xime.plugin.qwen_translate", dir, "main.js", store
         )
         try {
             assertTrue("main.js 应能加载", runtime.load())
-            val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_translate", runtime, store)
+            val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.qwen_translate", runtime, store)
 
             val state = adapter.getPanelState("ctx")
             // 翻译插件接受宿主上下文预填（选中文本优先；空串 = 空框手输）
@@ -420,15 +420,15 @@ class JsAiPluginTest {
             }
         }
 
-        // ai-translate 为 qwen-mt 专用（原文直传 + translation_options，无 prompt 模板字段）
+        // qwen-translate 为 qwen-mt 专用（原文直传 + translation_options，无 prompt 模板字段）
         val store = InMemoryConfigStore()
-        val dir = writePlugin("ai-translate")
+        val dir = writePlugin("qwen-translate")
         val runtime = JsScriptRuntime(
-            "com.kingzcheung.xime.plugin.ai_translate", dir, "main.js", store
+            "com.kingzcheung.xime.plugin.qwen_translate", dir, "main.js", store
         )
         try {
-            assertTrue("ai-translate main.js 应能加载", runtime.load())
-            val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.ai_translate", runtime, store)
+            assertTrue("qwen-translate main.js 应能加载", runtime.load())
+            val adapter = newAdapter(dir, "com.kingzcheung.xime.plugin.qwen_translate", runtime, store)
             val fields = adapter.getSettingsSchema()
             val keyToField = fields.associateBy { it.key }
             assertTrue("应包含 apiKey", keyToField.containsKey("apiKey"))

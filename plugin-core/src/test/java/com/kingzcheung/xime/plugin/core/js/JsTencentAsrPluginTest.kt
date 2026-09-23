@@ -6,6 +6,7 @@ import com.kingzcheung.xime.plugin.core.js.crypto.CryptoHostApi
 import com.kingzcheung.xime.plugin.core.js.ws.WsHostApi
 import com.kingzcheung.xime.plugin.core.js.ws.WsHostListener
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -16,8 +17,10 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * 验证 tencent-asr JS 版：腾讯云实时语音识别 V2（WebSocket）的签名鉴权、握手状态机、
+ * 验证 tencent-asr JS 版（v3）：腾讯云实时语音识别 V2（WebSocket）的签名鉴权、握手状态机、
  * 音频直发与句子结果解析全部在 JS 承载，宿主仅提供 host.ws / host.crypto 原语。
+ *
+ * v3 契约：宿主调用路径为 speech.*（start/feed/stop/cancel/isConfigured）+ settings.schema。
  *
  * 测试与发布同源：载入 xipm build 产物 build/plugin-js/tencent-asr/main.js。
  */
@@ -133,10 +136,10 @@ class JsTencentAsrPluginTest {
         try {
             assertTrue("main.js 应能加载", runtime.load())
 
-            assertTrue("未配置时不就绪", runtime.call("isConfigured") != true)
+            assertTrue("未配置时不就绪", runtime.call("speech.isConfigured") != true)
 
             // 设置 schema 非空且包含腾讯三要素
-            val schema = (runtime.call("getSettingsSchema") as? List<*>) ?: emptyList<Any?>()
+            val schema = (runtime.call("settings.schema") as? List<*>) ?: emptyList<Any?>()
             val schemaMap = schema.map { it as Map<*, *> }
             assertTrue("schema 非空", schema.isNotEmpty())
             val schemaKeys = schemaMap.mapNotNull { it["key"]?.toString() }
@@ -148,7 +151,7 @@ class JsTencentAsrPluginTest {
             runtime.asrResultCallback = collector
 
             // 未配置 → start 失败并 emitError
-            assertTrue("start 应失败（未配置）", runtime.call("start") != true)
+            assertFalse("start 应失败（未配置）", runtime.callAsync("speech.start") == true)
             awaitUntil { collector.error != null }
             assertEquals("未配置 AppID / SecretId / SecretKey，请在插件设置中填写", collector.error)
 
@@ -157,7 +160,7 @@ class JsTencentAsrPluginTest {
             store.set("secretId", "AKIDtest0000")
             store.set("secretKey", "test-secret")
             store.set("hotwordList", "语音|10,ASR|5")
-            assertTrue("start 应成功", runtime.call("start") == true)
+            assertTrue("start 应成功", runtime.callAsync("speech.start") == true)
             val url = mock.connectedUrl!!
             assertTrue("连接地址应为腾讯 ASR 域名",
                 url.startsWith("wss://asr.cloud.tencent.com/asr/v2/1234567890?"))
@@ -191,7 +194,7 @@ class JsTencentAsrPluginTest {
             assertEquals(0, mock.sentTexts.size)
 
             // 握手前音频 → 缓冲
-            runtime.call("processAudioChunk", byteArrayOf(1, 2, 3))
+            runtime.callAsync("speech.feed", byteArrayOf(1, 2, 3))
             assertEquals("握手前应缓冲音频", 0, mock.sentBinaries.size)
 
             // 握手成功文本帧 → 补发缓冲音频，之后音频原样直发（二进制 PCM）
@@ -199,7 +202,7 @@ class JsTencentAsrPluginTest {
             awaitUntil { mock.sentBinaries.isNotEmpty() }
             assertEquals("握手成功应补发缓冲音频", 1, mock.sentBinaries.size)
             assertTrue(byteArrayOf(1, 2, 3).contentEquals(mock.sentBinaries[0]))
-            runtime.call("processAudioChunk", byteArrayOf(4, 5))
+            runtime.callAsync("speech.feed", byteArrayOf(4, 5))
             assertEquals(2, mock.sentBinaries.size)
             assertTrue(byteArrayOf(4, 5).contentEquals(mock.sentBinaries[1]))
 
@@ -229,14 +232,14 @@ class JsTencentAsrPluginTest {
 
             // stop → 发送 {"type":"end"} 结束通知
             mock.closed = false
-            assertTrue(runtime.call("start") == true)
-            runtime.call("stop")
+            assertTrue(runtime.callAsync("speech.start") == true)
+            runtime.callAsync("speech.stop")
             awaitUntil { mock.sentTexts.isNotEmpty() }
             assertEquals("stop 应发送结束通知", 1, mock.sentTexts.size)
             assertEquals("""{"type":"end"}""", mock.sentTexts[0])
 
             // cancel → 直接关闭
-            runtime.call("cancel")
+            runtime.callAsync("speech.cancel")
             awaitUntil { mock.closed }
             assertTrue("cancel 应关闭连接", mock.closed)
         } finally {
@@ -257,7 +260,7 @@ class JsTencentAsrPluginTest {
             val collector = ResultCollector()
             runtime.asrResultCallback = collector
 
-            assertTrue(runtime.call("start") == true)
+            assertTrue("start 应成功", runtime.callAsync("speech.start") == true)
             mock.hostListener?.onOpen()
             Thread.sleep(200)
             // 鉴权失败握手帧（code 非 0）→ 上报错误并断开，音频不应外发
@@ -265,7 +268,7 @@ class JsTencentAsrPluginTest {
             awaitUntil { mock.closed && (collector.error ?: "").contains("4004") }
             assertTrue((collector.error ?: "").contains("4004"))
             assertTrue("握手失败应断开", mock.closed)
-            runtime.call("processAudioChunk", byteArrayOf(9, 9))
+            runtime.callAsync("speech.feed", byteArrayOf(9, 9))
             awaitUntil { mock.sentBinaries.size == 0 }
             assertEquals("断开后音频不应外发", 0, mock.sentBinaries.size)
         } finally {
