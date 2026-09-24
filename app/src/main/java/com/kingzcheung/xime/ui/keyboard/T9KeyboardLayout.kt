@@ -353,25 +353,25 @@ private fun T9KeyboardContent(
         val gesture = KeysConfigHelper.getT9KeyGesture(id) ?: return T9KeySwipes()
         val upHint = gesture.swipeUp?.let { it.label.ifEmpty { it.value } }
         val downHint = gesture.swipeDown?.let { it.label.ifEmpty { it.value } }
-        // display 三态：key=仅键面提示（无气泡）、bubble=仅滑动气泡、both=键面+气泡。
-        // 内置默认全为 key（无气泡）：上滑对象格式 { value: "N" } 默认 key，下滑对象格式同。
-        // SwipeableKeyButton 键面提示取 swipeUpKeyLabel ?: swipeText（null 回退气泡文本），
-        // bubble 模式传空串显式压制键面显示。手势回调独立于提示与 display。
+        // display 只管静态键面提示位置（bubble 不画键面，用空串压制回退）；
+        // 运行时气泡由 bubble 独立控制。手势回调与二者无关。
         val swipeUpKeyLabel = when {
             !swipeHints.up || !hintsActive -> null
             gesture.swipeUp?.display == DisplayMode.BUBBLE -> ""
             else -> upHint
         }
+        val swipeDownKeyLabel = when {
+            !swipeHints.down || !hintsActive -> null
+            gesture.swipeDown?.display == DisplayMode.BUBBLE -> ""
+            else -> downHint
+        }
         return T9KeySwipes(
             onSwipeUp = swipeHandlerFor(gesture.swipeUp, commitDirect, onGestureAction),
             onSwipeDown = swipeHandlerFor(gesture.swipeDown, commitDirect, onGestureAction),
-            swipeUpText = if (swipeHints.up && hintsActive &&
-                gesture.swipeUp?.display != DisplayMode.KEY) upHint else null,
-            swipeDownText = if (swipeHints.down && hintsActive &&
-                gesture.swipeDown?.display != DisplayMode.KEY) downHint else null,
+            swipeUpText = if (swipeHints.up && hintsActive && (gesture.swipeUp?.bubble ?: true)) upHint else null,
+            swipeDownText = if (swipeHints.down && hintsActive && (gesture.swipeDown?.bubble ?: true)) downHint else null,
             swipeUpKeyLabel = swipeUpKeyLabel,
-            swipeDownKeyLabel = if (swipeHints.down && hintsActive &&
-                gesture.swipeDown?.display != DisplayMode.BUBBLE) downHint else null,
+            swipeDownKeyLabel = swipeDownKeyLabel,
         )
     }
 
@@ -1060,16 +1060,11 @@ private fun T9SpaceKey(
                     onLongPress = {
                         if (voiceSticky) return@detectTapGestures
                         view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                        if (isSttEnabled) {
-                            if (!PermissionHelper.hasRecordAudioPermission(context)) {
-                                Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
-                                PermissionHelper.requestRecordAudioPermission(context)
-                            } else {
-                                currentOnVoiceModeChange?.invoke(true)
-                            }
+                        if (!PermissionHelper.hasRecordAudioPermission(context)) {
+                            Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
+                            PermissionHelper.requestRecordAudioPermission(context)
                         } else {
-                            // 连续空格：在主线程上快速发送多个 space
-                            repeat(5) { currentOnKeyPress("space") }
+                            currentOnVoiceModeChange?.invoke(true)
                         }
                     }
                 )

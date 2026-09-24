@@ -33,7 +33,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import com.kingzcheung.xime.keyboard.GestureAction
 import com.kingzcheung.xime.settings.DisplayMode
-import com.kingzcheung.xime.settings.GestureDef
+import com.kingzcheung.xime.settings.KeyAction
 import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.settings.swipeHandlerFor
 import androidx.compose.ui.Alignment
@@ -335,28 +335,27 @@ private fun StrokeKeyboardContent(
                 swipeUpKeyLabel = if (swipeHints.up && hintsActive) fallbackDigit else null,
             )
         }
-        fun hint(def: GestureDef?): String? =
+        fun hint(def: KeyAction?): String? =
             def?.let { it.label.ifEmpty { it.value } }
-        // display 三态：key=仅键面提示（无气泡）、bubble=仅滑动气泡、both=键面+气泡。
-        // SwipeableKeyButton 键面提示取 swipeUpKeyLabel ?: swipeText（null 回退气泡文本），
-        // bubble 模式传空串显式压制键面显示；气泡仅 bubble/both 时传（key 关闭气泡）。
+        // display 只管静态键面提示位置（bubble 不画键面，用空串压制回退）；
+        // 运行时气泡由 bubble 独立控制。
         val swipeUpKeyLabel = when {
             !swipeHints.up || !hintsActive -> null
             gesture.swipeUp?.display == DisplayMode.BUBBLE -> ""
             else -> hint(gesture.swipeUp)
         }
+        val swipeDownKeyLabel = when {
+            !swipeHints.down || !hintsActive -> null
+            gesture.swipeDown?.display == DisplayMode.BUBBLE -> ""
+            else -> hint(gesture.swipeDown)
+        }
         return StrokeKeySwipes(
             onSwipeUp = swipeHandlerFor(gesture.swipeUp, onKeyPress, onGestureAction),
             onSwipeDown = swipeHandlerFor(gesture.swipeDown, onKeyPress, onGestureAction),
-            swipeUpText = if (swipeHints.up && hintsActive &&
-                gesture.swipeUp?.display != DisplayMode.KEY) hint(gesture.swipeUp) else null,
-            swipeDownText = if (swipeHints.down && hintsActive &&
-                gesture.swipeDown?.display != DisplayMode.KEY) hint(gesture.swipeDown) else null,
+            swipeUpText = if (swipeHints.up && hintsActive && (gesture.swipeUp?.bubble ?: true)) hint(gesture.swipeUp) else null,
+            swipeDownText = if (swipeHints.down && hintsActive && (gesture.swipeDown?.bubble ?: true)) hint(gesture.swipeDown) else null,
             swipeUpKeyLabel = swipeUpKeyLabel,
-            swipeDownKeyLabel = gesture.swipeDown?.let { def ->
-                if (swipeHints.down && hintsActive && def.display != DisplayMode.BUBBLE)
-                    def.label.ifEmpty { def.value } else null
-            },
+            swipeDownKeyLabel = swipeDownKeyLabel,
         )
     }
 

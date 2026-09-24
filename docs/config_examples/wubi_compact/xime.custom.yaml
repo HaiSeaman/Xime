@@ -124,7 +124,7 @@ keyboard:
       n: { tap: "n", swipe_up: { label: "％", value: "%" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "key" }, long_press: { display: "bubble", values: ["n", "N", "ñ"] } }
       m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "key" }, long_press: { display: "bubble", values: ["m", "M"] } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
-      "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+      comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
       # 中/英切换键，label 为按键显示文字
       earth: { tap: { label: "英", action: "toggle_ascii" } }
    
@@ -162,6 +162,6 @@ keyboard:
       n: { tap: "n", swipe_up: "%", long_press: { display: "bubble", values: ["n", "N"] } }
       m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
-      "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." } }
+      comma: { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." } }
       # 中/英切换键，label 为按键显示文字
       earth: { tap: { label: "中", action: "toggle_ascii" } }
