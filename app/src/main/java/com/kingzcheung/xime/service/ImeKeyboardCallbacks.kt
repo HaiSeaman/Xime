@@ -4,6 +4,8 @@ import android.view.KeyEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
+import com.kingzcheung.xime.keyboard.KeyActionContext
+import com.kingzcheung.xime.keyboard.KeyActionRegistry
 import com.kingzcheung.xime.keyboard.OverlayRoute
 import com.kingzcheung.xime.rime.T9InputController
 import com.kingzcheung.xime.rime.RimeProcessResult
@@ -244,7 +246,7 @@ internal fun rememberImeKeyboardCallbacks(
                 }
             },
             onGestureAction = { action, value ->
-                action.execute(service, value)
+                KeyActionRegistry.execute(action, KeyActionContext(service), value)
             },
             onUpdateToolbarButtons = { buttons ->
                 SettingsPreferences.setToolbarButtons(service, buttons)

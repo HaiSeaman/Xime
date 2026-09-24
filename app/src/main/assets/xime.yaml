@@ -338,11 +338,19 @@ color_schemes:
     candidate_text_color_dark: 0xE4C656
 
 # ── 26 键全键盘手势配置 ──
-# 每个按键可定义 4 个手势：
-#   tap:        点按
-#   swipe_up:   上滑
-#   swipe_down: 下滑
-#   long_press: 长按（数组，弹出气泡后左右滑动选择）
+# 每个按键可定义以下手势：
+#   tap:         点按
+#   double_tap:  双击
+#   swipe_up:    上滑
+#   swipe_down:  下滑
+#   swipe_left:  左滑
+#   swipe_right: 右滑
+#   long_press:  长按（数组，弹出气泡后左右滑动选择）
+#
+# 左右滑与整片键盘滑动移动光标的关系：
+#   在键盘区域横向滑动默认用于移动光标；若某键配置了 swipe_left / swipe_right，
+#   该键上的横向滑动即由按键接管（执行配置动作），不再移动光标；未配置左右滑的键
+#   横向滑动仍用于移动光标。
 #
 # 每个手势的值格式：
 #   - 字符串 "a" → 按槽位默认动作（tap 为 send_rime：走按键路由进 rime，与手敲
@@ -352,10 +360,15 @@ color_schemes:
 #     action: send_rime（走按键路由进 rime 组合，tap 的默认，与手敲该键同一路由）,
 #             commit（输出 value 直接上屏，swipe/长按的默认）,
 #             command（内置命令，value 为命令名）,
-#             select_all, copy, cut, paste, line_start, line_end, undo, none, repeat
+#             select_all, copy, cut, paste, line_start, line_end, undo, none, repeat,
+#             功能键：delete, enter, space, repeat_space（value 为次数，默认 5），
+#                     clear_all, undo_clear, toggle_ascii, toggle_symbols, toggle_shift,
+#                     voice（进入语音输入）, switch_route（value: emoji|symbol|clipboard）
 #     command 可用命令：
 #       clear_composition - 清空当前输入编码和候选词
 #     value:  上屏时的输出文本（不指定则用 label）
+#   - 键级可选 width：列宽比例（数字）。字母键默认等宽（1），功能键有内置默认；
+#     设置后仅改变该键宽度占比，不显示为文字。
 #
 # long_press 示例（弹出多个选项供滑动选择）：
 #   long_press: { display: "bubble", values: [ { label: "大写", action: "commit", value: "A" }, { label: "Ä", action: "commit", value: "ä" } ] }
@@ -424,7 +437,9 @@ keyboard:
       rows:
         - [q, w, e, r, t, y, u, i, o, p]
         - [a, s, d, f, g, h, j, k, l]
-        - [z, x, c, v, b, n, m]
+        - [shift, z, x, c, v, b, n, m, delete]
+        # 第四行（控制行）：位置/是否出现由本 rows 决定，行为在下方 keys.<id> 配置
+        - [mode_change, comma, space, earth, enter]
     keys:
       # ── 第一行 ──
       # long_press 顺序：小写 → 大写 → 带变音符号的相似字母
@@ -452,16 +467,27 @@ keyboard:
       k: { tap: "k", swipe_up: { label: "（", value: "(" }, swipe_down: { label: "口Ⅲ川", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["k", "K"] } }
       l: { tap: "l", swipe_up: { label: "）", value: ")" }, swipe_down: { label: "田甲囗四罒车皿力", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["l", "L"] } }
       # ── 第三行 ──
-      z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key" }, long_press: { display: "bubble", values: [ "z","Z"] } }
+      z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
       x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
       c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
       v: { tap: "v", swipe_up: { label: "？", value: "?" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["v", "V"] } }
       b: { tap: "b", swipe_up: { label: "！", value: "!" }, swipe_down: { label: "子耳了也阝卩㔾凵", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["b", "B"] } }
       n: { tap: "n", swipe_up: { label: "％", value: "%" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["n", "N", "ñ"] } }
       m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
-      # ── 第四行: 暂时不受layout控制 ──
+      # shift：单击切单击态、双击锁定大写；命令值走键盘按键路由（shift_single / shift_caps）
+      shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
+      # delete：单击删除、长按重复删、上滑清空、下滑撤回、左右滑清空输入
+      delete: { width: 1.4, tap: { action: delete }, long_press: { values: [ { action: delete, repeat: true } ] }, swipe_up: { action: clear_all, label: "上滑清空" }, swipe_down: { action: undo_clear, label: "下滑撤回" }, swipe_left: { action: command, value: clear_composition }, swipe_right: { action: command, value: clear_composition } }
+      # ── 第四行功能键（位置/是否出现由上方 layout.rows 第四行决定；行为在此定义）──
+      # ?123：单击切面板，长按弹出「数字 / 常用符号」（命令值走键盘按键路由）
+      mode_change: { width: 1.2, tap: { action: command, value: mode_change }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
+      # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
+      # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
+      space: { width: 3, tap: { action: space }, long_press: { values: [ { action: voice } ] } }
+      # 回车键
+      enter: { width: 1.2, tap: { action: enter } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
-      "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+      comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
       # 中/英切换键，label 为按键显示文字
       earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
     
@@ -475,7 +501,9 @@ keyboard:
       rows:
         - [q, w, e, r, t, y, u, i, o, p]
         - [a, s, d, f, g, h, j, k, l]
-        - [z, x, c, v, b, n, m]
+        - [shift, z, x, c, v, b, n, m, delete]
+        # 第四行（控制行）：位置/是否出现由本 rows 决定，行为在下方 keys.<id> 配置
+        - [mode_change, comma, space, earth, enter]
     keys:
       # ── 第一行 ──
       q: { tap: "q", swipe_up: "1", long_press: { display: "bubble", values: ["q", "Q"] } }
@@ -508,8 +536,19 @@ keyboard:
       b: { tap: "b", swipe_up: "!", long_press: { display: "bubble", values: ["b", "B"] } }
       n: { tap: "n", swipe_up: "%", long_press: { display: "bubble", values: ["n", "N"] } }
       m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
+      # shift：单击切单击态、双击锁定大写（命令值走键盘按键路由）
+      shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
+      # delete：单击删除、长按重复删、上滑清空、下滑撤回、左右滑清空输入
+      delete: { width: 1.4, tap: { action: delete }, long_press: { values: [ { action: delete, repeat: true } ] }, swipe_up: { action: clear_all, label: "上滑清空" }, swipe_down: { action: undo_clear, label: "下滑撤回" }, swipe_left: { action: command, value: clear_composition }, swipe_right: { action: command, value: clear_composition } }
+      # ?123：单击切面板，长按弹出「数字 / 常用符号」
+      mode_change: { width: 1.2, tap: { action: command, value: mode_change }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
+      # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
+      # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
+      space: { width: 3, tap: { action: space }, long_press: { values: [ { action: voice } ] } }
+      # 回车键
+      enter: { width: 1.2, tap: { action: enter } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
-      "'": { tap: { label: ".", value: "." }, swipe_up: { label: ",", value: "," } }
+      comma: { tap: { label: ".", value: "." }, swipe_up: { label: ",", value: "," } }
       # 中/英切换键，label 为按键显示文字
       earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
 
@@ -549,7 +588,7 @@ keyboard:
       cv: { tap: { label: "cv", value: "c" }, swipe_up: "、", long_press: { display: "bubble", values: ["c", "v", "C", "V"] } }
       bn: { tap: { label: "bn", value: "b" }, swipe_up: "!", long_press: { display: "bubble", values: ["b", "n", "B", "N"] } }
       m:  { tap: { label: "m", value: "m" }, swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
-      "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+      comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
       earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
 
   # 拼音 17 键：we/rt/yu/op、sd/fg/jk、xc/bn（对应方案 pinyin_17jian）
@@ -580,7 +619,7 @@ keyboard:
       v:  { tap: { label: "v", value: "v" }, swipe_up: "?", long_press: { display: "bubble", values: ["v", "V"] } }
       bn: { tap: { label: "bn", value: "b" }, swipe_up: "!", long_press: { display: "bubble", values: ["b", "n", "B", "N"] } }
       m:  { tap: { label: "m", value: "m" }, swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
-      "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+      comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
       earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
 
   # 拼音 18 键：we/rt/io、sd/fg/jk、xc/bn（对应方案 pinyin_18jian）
@@ -612,7 +651,7 @@ keyboard:
       v:  { tap: { label: "v", value: "v" }, swipe_up: "?", long_press: { display: "bubble", values: ["v", "V"] } }
       bn: { tap: { label: "bn", value: "b" }, swipe_up: "!", long_press: { display: "bubble", values: ["b", "n", "B", "N"] } }
       m:  { tap: { label: "m", value: "m" }, swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
-      "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+      comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
       earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
 
   # 九键（T9）键盘配置
@@ -636,20 +675,20 @@ keyboard:
     # 或 switch_route: clipboard 打开剪贴板面板）。
     # 动作可选值见 GestureAction：commit/select_all/copy/cut/paste/line_start/line_end/
     # undo/repeat/command/switch_route（value: emoji|symbol|clipboard 打开对应面板）等；
-    # display 控制提示显示位置：key（仅键面提示，无滑动气泡）/ bubble（仅滑动气泡，
-    # 不印键面）/ both（键面+气泡）。内置默认全部显式配 display: "key"（不显示滑动
-    # 气泡）；想要气泡自行改为 display: "both"。手势功能与提示相互独立，
-    # 提示开关/display 关闭提示后手势仍生效。
+    # display 只管静态提示位置：key（画在键面）/ bubble（不画键面，留给气泡）/ both；
+    # bubble 独立控制运行时是否弹气泡（默认 true）。二者互不影响。
+    # 内置默认 display: "key" + bubble: false：数字作为键面角标提示、拖动不弹气泡。
+    # 想要拖动气泡自行改为 bubble: true。手势功能与提示相互独立。
     keys:
-      "1": { swipe_up: { value: "1", display: "key" } }
-      "2": { swipe_up: { value: "2", display: "key" } }
-      "3": { swipe_up: { value: "3", display: "key" } }
-      "4": { swipe_up: { value: "4", display: "key" } }
-      "5": { swipe_up: { value: "5", display: "key" } }
-      "6": { swipe_up: { value: "6", display: "key" } }
-      "7": { swipe_up: { value: "7", display: "key" } }
-      "8": { swipe_up: { value: "8", display: "key" } }
-      "9": { swipe_up: { value: "9", display: "key" } }
+      "1": { swipe_up: { value: "1", display: "key", bubble: false } }
+      "2": { swipe_up: { value: "2", display: "key", bubble: false } }
+      "3": { swipe_up: { value: "3", display: "key", bubble: false } }
+      "4": { swipe_up: { value: "4", display: "key", bubble: false } }
+      "5": { swipe_up: { value: "5", display: "key", bubble: false } }
+      "6": { swipe_up: { value: "6", display: "key", bubble: false } }
+      "7": { swipe_up: { value: "7", display: "key", bubble: false } }
+      "8": { swipe_up: { value: "8", display: "key", bubble: false } }
+      "9": { swipe_up: { value: "9", display: "key", bubble: false } }
 
   # 笔画键盘配置
   # 注意：本键盘不支持 button_layout（按键布局模式），固定 standard 键面布局；
@@ -668,19 +707,19 @@ keyboard:
     # ── 笔画键手势（可自定义：在 xime.custom.yaml 的 keyboard.stroke.keys 同路径覆盖）──
     # 键 id 为键面标签；内置默认：上滑输入对应数字（与历史行为一致，此前版本该手势
     # 因缺少滑动提示文本实际不触发，现修复生效），下滑可按需绑定编辑动作。
-    # display：key（仅键面提示，无滑动气泡）/ bubble（仅滑动气泡）/ both（键面+气泡）。
-    # 内置上滑全部显式配 display: "key"（不显示滑动气泡，数字提示由键面右上角角标
-    # 承担）；想要拖动气泡自行改为 display: "both"。手势功能与提示相互独立。
+    # display：key（画在键面）/ bubble（不画键面，留给气泡）/ both；bubble 独立控制
+    # 运行时是否弹气泡（默认 true）。内置上滑 display: "key" + bubble: false（不弹气泡，
+    # 数字提示由键面角标承担）；想要拖动气泡自行改为 bubble: true。手势功能与提示相互独立。
     keys:
-      "一": { swipe_up: { value: "1", display: "key" } }
-      "丨": { swipe_up: { value: "2", display: "key" } }
-      "丿": { swipe_up: { value: "3", display: "key" } }
-      "丶": { swipe_up: { value: "4", display: "key" } }
-      "乛": { swipe_up: { value: "5", display: "key" } }
-      "*": { swipe_up: { value: "6", display: "key" } }
-      "分词": { swipe_up: { value: "7", display: "key" } }
-      "，": { swipe_up: { value: "8", display: "key" } }
-      "英": { swipe_up: { value: "9", display: "key" } }
+      "一": { swipe_up: { value: "1", display: "key", bubble: false } }
+      "丨": { swipe_up: { value: "2", display: "key", bubble: false } }
+      "丿": { swipe_up: { value: "3", display: "key", bubble: false } }
+      "丶": { swipe_up: { value: "4", display: "key", bubble: false } }
+      "乛": { swipe_up: { value: "5", display: "key", bubble: false } }
+      "*": { swipe_up: { value: "6", display: "key", bubble: false } }
+      "分词": { swipe_up: { value: "7", display: "key", bubble: false } }
+      "，": { swipe_up: { value: "8", display: "key", bubble: false } }
+      "英": { swipe_up: { value: "9", display: "key", bubble: false } }
 
   # 手写键盘配置
   # schemas 声明使用手写布局的方案：手写不经过 rime 引擎（由 HandwritingEngine

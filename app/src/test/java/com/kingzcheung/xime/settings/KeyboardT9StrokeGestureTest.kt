@@ -102,7 +102,7 @@ class KeyboardT9StrokeGestureTest {
         var committed: String? = null
         var dispatched: Pair<GestureAction, String>? = null
         val handler = swipeHandlerFor(
-            GestureDef(label = "5", action = GestureAction.COMMIT, value = "5"),
+            KeyAction(label = "5", action = GestureAction.COMMIT, value = "5"),
             onCommitText = { committed = it },
             onGestureAction = { action, value -> dispatched = action to value },
         )
@@ -116,7 +116,7 @@ class KeyboardT9StrokeGestureTest {
         var committed: String? = null
         var dispatched: Pair<GestureAction, String>? = null
         val handler = swipeHandlerFor(
-            GestureDef(label = "复制", action = GestureAction.COPY),
+            KeyAction(label = "复制", action = GestureAction.COPY),
             onCommitText = { committed = it },
             onGestureAction = { action, value -> dispatched = action to value },
         )
@@ -129,7 +129,7 @@ class KeyboardT9StrokeGestureTest {
     fun `swipeHandlerFor value 优先于 label`() {
         var dispatched: Pair<GestureAction, String>? = null
         swipeHandlerFor(
-            GestureDef(label = "剪贴板", action = GestureAction.SWITCH_ROUTE, value = "clipboard"),
+            KeyAction(label = "剪贴板", action = GestureAction.SWITCH_ROUTE, value = "clipboard"),
             onCommitText = {},
             onGestureAction = { action, value -> dispatched = action to value },
         )!!.invoke()
@@ -139,8 +139,8 @@ class KeyboardT9StrokeGestureTest {
     @Test
     fun `swipeHandlerFor 空定义 NONE 与 action null 均视为未绑定`() {
         assertNull(swipeHandlerFor(null, {}, null))
-        assertNull(swipeHandlerFor(GestureDef(action = GestureAction.NONE), {}, null))
-        assertNull(swipeHandlerFor(GestureDef(label = "x", action = null), {}, null))
+        assertNull(swipeHandlerFor(KeyAction(action = GestureAction.NONE), {}, null))
+        assertNull(swipeHandlerFor(KeyAction(label = "x", action = null), {}, null))
     }
 
     // ── 内置默认绑定（守护 xime.yaml 资产与解析/前端约定不脱节） ──
@@ -156,7 +156,7 @@ class KeyboardT9StrokeGestureTest {
         error("file not found: $rel")
     }
 
-    private fun loadAssetSection(section: String): Map<String, KeyGestureConfig> {
+    private fun loadAssetSection(section: String): Map<String, KeyBinding> {
         val text = repoFile("src/main/assets/xime.yaml").readText()
         return KeysConfigHelper.parseKeyboardYamlSection(text, section) ?: emptyMap()
     }

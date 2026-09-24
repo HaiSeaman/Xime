@@ -285,6 +285,44 @@ class KeyboardMergedLayoutTest {
     // ── 手势配置完整性 ──
 
     @Test
+    fun `内置 qwerty rows 含功能键且与 keys 对应`() {
+        val yaml = ximeYamlText()
+        val rows = KeysConfigHelper.parseKeyboardLayoutYamlText(yaml, "qwerty")
+            ?: error("xime.yaml 缺少 qwerty rows")
+        val keys = KeysConfigHelper.parseKeyboardYamlSection(yaml, "qwerty")
+            ?: error("xime.yaml 缺少 qwerty keys")
+        val flat = rows.flatten()
+        // 第 3 行两端：shift / delete
+        assertTrue("rows 应含 shift", flat.contains("shift"))
+        assertTrue("rows 应含 delete", flat.contains("delete"))
+        // 第 4 行控制行
+        for (id in listOf("mode_change", "space", "earth", "enter")) {
+            assertTrue("rows 应含控制键 $id", flat.contains(id))
+        }
+        // 逗号键（配置驱动）仍在 keys 中且为功能键 id
+        assertTrue("FUNCTION_KEY_IDS 应含 comma", "comma" in KeysConfigHelper.FUNCTION_KEY_IDS)
+        assertTrue("keys 应含 comma 配置", keys.containsKey("comma"))
+    }
+
+    @Test
+    fun `docs 配置示例若定义 rows 必须含功能键`() {
+        val dir = repoFile("docs/config_examples")
+        val files = dir.listFiles { f -> f.isDirectory }
+            ?.map { File(it, "xime.custom.yaml") }
+            ?.filter { it.exists() }
+            ?: emptyList()
+        assertTrue("应找到示例配置", files.isNotEmpty())
+        for (f in files) {
+            // 仅校验显式定义了 layout.rows 的示例（未定义的会继承内置 rows，无需校验）
+            val rows = KeysConfigHelper.parseKeyboardLayoutYamlText(f.readText(), "qwerty") ?: continue
+            val flat = rows.flatten()
+            for (id in listOf("shift", "delete", "mode_change", "comma", "space", "earth", "enter")) {
+                assertTrue("${f.parentFile?.name} 的 rows 应含 $id", flat.contains(id))
+            }
+        }
+    }
+
+    @Test
     fun `三个布局每个字母键都有 swipe_up`() {
         for (section in listOf("qwerty_14", "qwerty_17", "qwerty_18")) {
             val yaml = ximeYamlText()
