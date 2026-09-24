@@ -9,7 +9,7 @@
 //       --history 拉取宿主错误落盘文件 errors.jsonl（run-as，仅 debug 包）。
 //
 // 依赖：adb（PATH / ANDROID_HOME / ANDROID_SDK_ROOT / --adb），USB 或无线调试均可。
-// 宿主侧要求：DevPluginInstallActivity（app/src/main，exported=false，开发模式开关门禁）。
+// 宿主侧要求：DevPluginInstallActivity（app/src/main，exported=true，开发模式开关门禁）。
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -213,7 +213,10 @@ impl Adb {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// 启动 logcat 跟随线程（过滤插件相关 tag），返回子进程句柄（用于退出清理）。
-fn spawn_logcat(adb: &Adb, plugin_id: &str) -> Result<Child> {
+///
+/// debug 通道：JsPlugin（console）与 PluginErrorLog（错误）由落盘通道负责，logcat
+/// 侧排除以免重复；release 通道无落盘跟随，必须保留这两类 tag 才能看到插件日志。
+fn spawn_logcat(adb: &Adb, plugin_id: &str, channel: DevChannel) -> Result<Child> {
     let mut child = adb
         .cmd()
         .arg("logcat")
@@ -227,12 +230,14 @@ fn spawn_logcat(adb: &Adb, plugin_id: &str) -> Result<Child> {
         .context("启动 adb logcat 失败")?;
     let stdout = child.stdout.take().expect("logcat stdout");
     let id = plugin_id.to_string();
+    let file_channel = channel == DevChannel::Debug;
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(std::result::Result::ok) {
-            // 宿主行为日志（加载/热更新/事件等，含插件 id 的行）；
-            // JsPlugin（console）与 PluginErrorLog（错误）已由落盘通道负责，避免重复显示。
-            if !(line.contains(&id) && !line.contains("JsPlugin") && !line.contains("PluginErrorLog"))
-            {
+            if !line.contains(&id) {
+                continue;
+            }
+            // 落盘通道可读时，JsPlugin/PluginErrorLog 已由文件跟随器输出，避免重复
+            if file_channel && (line.contains("JsPlugin") || line.contains("PluginErrorLog")) {
                 continue;
             }
             print_log_line(&line);
@@ -242,9 +247,10 @@ fn spawn_logcat(adb: &Adb, plugin_id: &str) -> Result<Child> {
 }
 
 fn print_log_line(line: &str) {
-    let out = if line.contains(" E ") {
+    // `logcat -v time` 优先级字段形如 ` E/TAG`、` W/TAG`（单字母 + 斜杠）
+    let out = if line.contains(" E/") {
         color::red(line)
-    } else if line.contains(" W ") {
+    } else if line.contains(" W/") {
         color::yellow(line)
     } else {
         line.to_string()
@@ -348,7 +354,7 @@ pub async fn run_dev(args: DevArgs) -> Result<()> {
         None
     } else {
         println!("  日志跟随中（console/错误落盘通道 + 宿主日志；Ctrl-C 退出）");
-        Some(spawn_logcat(&adb, &manifest.id)?)
+        Some(spawn_logcat(&adb, &manifest.id, channel)?)
     };
 
     let mut last = fingerprint(&dir);
@@ -553,11 +559,28 @@ pub async fn run_logs(args: LogsArgs) -> Result<()> {
         "▶ 跟随 {} 的插件日志与错误（Ctrl-C 退出；历史错误用 --history）",
         manifest.id
     );
-    let follower = spawn_error_follower(adb.clone(), args.package.clone(), manifest.id.clone());
-    let mut child = spawn_logcat(&adb, &manifest.id)?;
+    // 通道探测：debug 包走 run-as 落盘跟随；release 包无落盘，仅 logcat（含 JsPlugin/错误 tag）
+    let channel = if adb.run_as(&args.package, &["true"]).is_ok() {
+        DevChannel::Debug
+    } else {
+        DevChannel::ReleaseCompat
+    };
+    let follower = if channel == DevChannel::Debug {
+        Some(spawn_error_follower(
+            adb.clone(),
+            args.package.clone(),
+            manifest.id.clone(),
+        ))
+    } else {
+        println!("  release 通道：无错误落盘跟随（--history 不可用），仅 logcat 实时日志");
+        None
+    };
+    let mut child = spawn_logcat(&adb, &manifest.id, channel)?;
     tokio::signal::ctrl_c().await.ok();
     let _ = child.kill();
-    follower.stop();
+    if let Some(f) = follower {
+        f.stop();
+    }
     Ok(())
 }
 

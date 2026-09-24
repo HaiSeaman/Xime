@@ -21,10 +21,11 @@ import kotlinx.coroutines.launch
  * [DevPluginInstaller] 删除）。
  *
  * 安全门禁（仅 release）：设置 → 关于 → 连点设备信息 7 次解锁的"插件开发模式"
- * 开关。开关关闭时本 Activity 立即 finish、不读 path、不安装——组件虽注册但无
- * 注入面；shell 持 START_ANY_ACTIVITY 可拉起非导出组件，普通应用则完全无法
- * 触达（exported=false）。debug 包 debuggable（run-as 全量开放），门禁无意义，
- * 直接放行。
+ * 开关。开关关闭时本 Activity 立即 finish、不读 path、不安装，组件无注入面。
+ * 组件 exported=true：Android 15 起 adb shell 已无法启动非导出组件，热安装通道
+ * 依赖 `am start`；普通应用虽可拉起，但在开发模式关闭时会被门禁直接拒绝，仅开发
+ * 模式开启的调试窗口内可安装。debug 包 debuggable（run-as 全量开放），门禁无
+ * 意义，直接放行。
  *
  * `adb shell am start` 由 shell（特权）发起，不受应用后台执行限制，宿主在后台
  * （如未使用键盘）时也能可靠触发；透明无界面主题、无历史记录，安装完成后立即
